@@ -1,0 +1,108 @@
+/* 3D Atmospheric Glowing AI Plasma Sphere */
+.loader-container-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.loader-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  user-select: none;
+  overflow: hidden;
+  box-shadow: 
+    0 0 50px -5px rgba(192, 132, 252, 0.45),
+    0 0 90px -15px rgba(124, 58, 237, 0.35);
+  animation: orbBreathing 4s ease-in-out infinite alternate;
+}
+
+@keyframes orbBreathing {
+  0% {
+    transform: scale(0.985);
+    box-shadow: 
+      0 0 45px -5px rgba(192, 132, 252, 0.4),
+      0 0 85px -15px rgba(124, 58, 237, 0.3);
+  }
+  100% {
+    transform: scale(1.015);
+    box-shadow: 
+      0 0 65px 0 rgba(216, 180, 254, 0.55),
+      0 0 110px -10px rgba(139, 92, 246, 0.45);
+  }
+}
+
+/* 3D Atmospheric Plasma Sphere Layer */
+.loader-wrapper .loader {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 16%,
+    #f5d0fe 0%,
+    #e879f9 14%,
+    #9333ea 34%,
+    #4314e7 56%,
+    #1e0b5a 76%,
+    #0a0319 92%
+  );
+  box-shadow: 
+    inset 0 0 40px 10px rgba(245, 208, 254, 0.35),
+    inset 0 -35px 50px rgba(0, 0, 0, 0.95);
+  animation: orbAtmosphere 8s ease-in-out infinite alternate;
+  z-index: 1;
+}
+
+@keyframes orbAtmosphere {
+  0% {
+    filter: brightness(1) contrast(1.02);
+  }
+  100% {
+    filter: brightness(1.12) contrast(1.08);
+  }
+}
+
+/* Luminous Letter Track Directly Over 3D Orb */
+.loader-letter-track {
+  position: relative;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5px;
+  padding: 4px 12px;
+}
+
+/* Letters with Organic Wave Shimmer Physics */
+.loader-letter-track .loader-letter {
+  display: inline-block;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  animation: letterShimmer 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes letterShimmer {
+  0%, 100% {
+    opacity: 0.65;
+    color: rgba(255, 255, 255, 0.75);
+    transform: translateY(0);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  }
+  50% {
+    opacity: 1;
+    color: #ffffff;
+    text-shadow: 
+      0 0 10px rgba(255, 255, 255, 1),
+      0 0 22px rgba(232, 121, 249, 0.9);
+    transform: translateY(-2.5px) scale(1.08);
+  }
+}

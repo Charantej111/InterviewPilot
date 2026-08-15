@@ -1,0 +1,30 @@
+.magic-bento-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.magic-bento-card:hover {
+  border-color: rgba(90, 85, 223, 0.45);
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.15);
+}
+
+.magic-bento-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(90, 85, 223, 0.12),
+    transparent 40%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.magic-bento-card:hover .magic-bento-spotlight {
+  opacity: 1;
+}
