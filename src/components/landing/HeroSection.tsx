@@ -35,7 +35,7 @@ export const HeroSection: React.FC = () => {
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Main Headline with Proportionate Cursive "Good to See You!" */}
         <h1 className="tracking-tight leading-[1.15] mb-4">
-          <span className="block font-cursive text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-foreground transform -rotate-1 inline-block drop-shadow-xs mb-1 select-none">
+          <span className="inline-block font-cursive text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-foreground transform -rotate-1 drop-shadow-xs mb-1 select-none">
             Good to See You!
           </span>
           <span className="block text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight mt-1">
