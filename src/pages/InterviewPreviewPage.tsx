@@ -15,7 +15,17 @@ export const InterviewPreviewPage: React.FC = () => {
   const { activeSession } = useInterview();
   const navigate = useNavigate();
 
+  React.useEffect(() => {
+    if (activeSession.status === 'failed') {
+      navigate('/dashboard');
+    }
+  }, [activeSession.status, navigate]);
+
   const handleStart = () => {
+    if (activeSession.status === 'failed') {
+      navigate('/dashboard');
+      return;
+    }
     navigate(`/interview/${activeSession.id}`);
   };
 

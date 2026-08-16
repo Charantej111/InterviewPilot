@@ -1,16 +1,34 @@
 export type InterviewType = 'behavioral' | 'product_case' | 'technical' | 'mixed';
 export type InterviewDifficulty = 'beginner' | 'intermediate' | 'advanced';
-export type InterviewDuration = 15 | 30 | 45;
+export type InterviewDuration = 10 | 15 | 20 | 30 | 45;
+export type InterviewStyle = 'friendly' | 'realistic' | 'challenging';
+
+export interface QuestionEvaluationCriteria {
+  coreCompetency: string;
+  lookFor: string[];
+  redFlags: string[];
+  rubricDimensions: ('clarity' | 'depth' | 'evidence' | 'relevance' | 'structure' | 'role_alignment')[];
+}
+
+export interface AdaptiveFollowUpTrigger {
+  condition: string;
+  followUpProbe: string;
+}
 
 export interface Question {
   id: string;
   order: number;
   type: 'initial' | 'follow_up';
-  parentQuestionId?: string;
-  category: 'Product Thinking' | 'Behavioral' | 'Technical' | 'Analytical Reasoning' | 'Resume Deep Dive' | 'Communication';
+  parentQuestionId?: string | null;
+  category: string;
   text: string;
+  intent?: string;
   contextExplanation?: string;
   recommendedDurationSeconds?: number;
+  expectedSignals?: string[];
+  redFlags?: string[];
+  evaluationCriteria?: QuestionEvaluationCriteria;
+  adaptiveFollowUpTriggers?: AdaptiveFollowUpTrigger[];
   sampleAnswer?: string;
   expectedKeyPoints?: string[];
 }
@@ -47,14 +65,18 @@ export interface InterviewSession {
   id: string;
   createdAt: string;
   completedAt?: string;
-  status: 'draft' | 'in_progress' | 'evaluating' | 'completed';
+  status: 'draft' | 'in_progress' | 'evaluating' | 'completed' | 'failed';
   jobTitle: string;
   company: string;
   interviewType: InterviewType;
   difficulty: InterviewDifficulty;
   durationMinutes: InterviewDuration;
+  interviewStyle?: InterviewStyle;
   focusAreas: string[];
   resumeName: string;
+  resumeId?: string;
+  jobDescriptionId?: string;
+  companyResearchId?: string;
   resumeParsedData?: {
     candidateName: string;
     extractedRole: string;

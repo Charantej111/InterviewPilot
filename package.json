@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@lottiefiles/dotlottie-react": "^0.19.14",
     "@supabase/supabase-js": "^2.112.3",
     "@types/three": "^0.185.4",
     "canvas-confetti": "^1.9.4",

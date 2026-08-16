@@ -88,7 +88,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept=".pdf,.docx,.txt"
+        accept=".pdf,.doc,.docx"
         className="hidden"
       />
 

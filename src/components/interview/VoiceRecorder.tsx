@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Waveform } from '../ui/Waveform';
 import { Button } from '../ui/Button';
 import { ShiningText } from '../ui/ShiningText';
-import { Mic, MicOff, RotateCcw, Volume2, Sparkles, AudioWaveform } from 'lucide-react';
+import { RotateCcw, Volume2, Sparkles, AudioWaveform } from 'lucide-react';
 import { formatTime } from '../../lib/utils';
+import './VoiceWave.css';
 
 export interface VoiceRecorderProps {
   isRecording: boolean;
@@ -41,9 +41,9 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const estimatedWPM = recordSeconds > 5 ? Math.round((wordCount / recordSeconds) * 60) : 0;
 
   return (
-    <div className="rounded-3xl border border-zinc-200 dark:border-white/10 bg-white/90 dark:bg-[#11111a]/95 backdrop-blur-2xl p-6 sm:p-8 space-y-6 shadow-xl text-center">
+    <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8 space-y-6 shadow-md text-center">
       {/* Top Audio Telemetry Strip */}
-      <div className="flex items-center justify-between text-xs text-zinc-500 pb-2 border-b border-zinc-100 dark:border-zinc-800/80">
+      <div className="flex items-center justify-between text-xs text-zinc-500 pb-2 border-b border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-emerald-500'}`} />
           <span className="font-semibold text-foreground">
@@ -62,44 +62,37 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
         </div>
       </div>
 
-      {/* Central Interactive Voice Orb Capsule */}
-      <div className="py-4 flex flex-col items-center justify-center space-y-4">
-        {/* Pulsing Concentric Acoustic Rings */}
-        <div className="relative flex items-center justify-center">
-          {isRecording && (
-            <>
-              <div className="absolute w-28 h-28 rounded-full bg-red-500/15 animate-ping duration-1000 pointer-events-none" />
-              <div className="absolute w-24 h-24 rounded-full bg-red-500/20 animate-pulse duration-700 pointer-events-none" />
-            </>
-          )}
+      {/* Central Interactive Voice Wave Capsule */}
+      <div className="py-2 flex flex-col items-center justify-center space-y-3">
+        <div 
+          onClick={onToggleRecording}
+          className="voice-wave-wrapper relative mx-auto"
+        >
+          {/* Gradient glow background */}
+          <div className="voice-glow">
+            <div className="glow-ellipse" />
+            <div className="glow-polygon" />
+          </div>
 
-          {/* Central Mic Button */}
-          <button
-            type="button"
-            onClick={onToggleRecording}
-            className={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg ${
-              isRecording
-                ? 'bg-red-600 hover:bg-red-700 text-white shadow-red-500/30 scale-105'
-                : 'bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 shadow-sm hover:scale-105'
-            }`}
-            title={isRecording ? 'Stop Recording' : 'Start Recording'}
-          >
-            {isRecording ? <MicOff size={28} className="animate-pulse" /> : <Mic size={28} />}
-          </button>
+          {/* Audio wave bars */}
+          <div className="audio-wave">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span
+                key={i}
+                className={`bar ${isRecording ? 'active' : ''}`}
+                style={{ animationDelay: `${i * 0.12}s` }}
+              />
+            ))}
+          </div>
         </div>
 
         <p className="text-xs font-semibold text-foreground-muted">
-          {isRecording ? 'Listening... Speak your answer naturally' : 'Click microphone to record your response'}
+          {isRecording ? 'Listening... Click card to finish speaking' : 'Click card to start speaking'}
         </p>
-
-        {/* Dynamic Waveform Visualizer */}
-        <div className="w-full max-w-lg h-16 rounded-2xl bg-zinc-50 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center px-4 shadow-inner">
-          <Waveform isRecording={isRecording} barCount={48} />
-        </div>
       </div>
 
       {/* Live Speech-to-Text Transcript Display */}
-      <div className="text-left p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800/90 space-y-2">
+      <div className="text-left p-4 sm:p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200 dark:border-zinc-800 space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
             <AudioWaveform size={13} className="text-zinc-400" />
@@ -124,7 +117,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             <p className="text-zinc-400 dark:text-zinc-500 italic text-xs">
               {isRecording
                 ? 'Listening to speech and transcribing in real-time...'
-                : 'Click the microphone above to start speaking, or insert a sample test answer.'}
+                : 'Click the card above to start speaking, or insert a sample test answer.'}
             </p>
           )}
         </div>
@@ -159,7 +152,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             size="sm"
             onClick={onToggleRecording}
             variant={isRecording ? 'danger' : 'primary'}
-            leftIcon={isRecording ? <Volume2 size={14} /> : <Mic size={14} />}
+            leftIcon={isRecording ? <Volume2 size={14} /> : <Volume2 size={14} />}
           >
             {isRecording ? 'Finish Speaking' : 'Start Recording'}
           </Button>

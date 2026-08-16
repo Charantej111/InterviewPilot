@@ -4,39 +4,59 @@ import {
   Question, 
   QuestionFeedback, 
   FinalReport,
-  InterviewType,
-  InterviewDifficulty,
-  InterviewDuration
+  InterviewType, 
+  InterviewDifficulty, 
+  InterviewDuration,
+  InterviewStyle,
 } from '../types/interview';
+import { CandidateProfile } from '../types/resume';
+import { JobProfile } from '../types/jobDescription';
+import { CompanyResearchData } from '../types/companyResearch';
+import { MatchAnalysisResult, GapPriority } from '../types/matchAnalysis';
 import { sampleActiveSession } from '../data/mockInterviews';
-import { sampleResume } from '../data/mockResume';
 import { sampleFinalReport } from '../data/mockReports';
 import { useUser } from './UserContext';
 import { interviewService } from '../services/supabase/interviewService';
 import { resumeService } from '../services/supabase/resumeService';
+import { jobDescriptionService } from '../services/supabase/jobDescriptionService';
+import { companyResearchService } from '../services/supabase/companyResearchService';
+import { matchAnalysisService } from '../services/supabase/matchAnalysisService';
+import { aiService } from '../services/supabase/aiService';
 import { evaluationService } from '../services/supabase/evaluationService';
 import { storage } from '../lib/storage';
 
-interface SetupDraft {
+export interface SetupDraft {
   resumeId?: string;
   resumeName: string;
   resumeFileSize: string;
   resumeParsed: boolean;
+  candidateProfile: CandidateProfile | null;
   jobDescriptionId?: string;
   jobTitle: string;
   company: string;
+  jobDescriptionText: string;
+  jobProfile: JobProfile | null;
+  companyResearchId?: string;
+  companyResearch: CompanyResearchData | null;
+  matchAnalysis: MatchAnalysisResult | null;
   interviewType: InterviewType;
   difficulty: InterviewDifficulty;
   durationMinutes: InterviewDuration;
-  jobDescriptionText: string;
+  interviewStyle: InterviewStyle;
   focusAreas: string[];
+  tailoredQuestions: Question[];
 }
 
 interface InterviewContextType {
   setupDraft: SetupDraft;
   updateSetupDraft: (updates: Partial<SetupDraft>) => void;
   resetSetupDraft: () => void;
-  uploadResumeFile: (file: File) => Promise<{ resumeId: string; fileName: string; fileSize: string }>;
+  uploadResumeFile: (file: File) => Promise<{ resumeId: string; fileName: string; fileSize: string; profile: CandidateProfile }>;
+  analyzeJobDescription: (title: string, company: string, rawText: string) => Promise<JobProfile>;
+  researchCompanyContext: (companyName: string, role: string) => Promise<CompanyResearchData>;
+  updateGapPriority: (gapId: string, priority: GapPriority) => void;
+  prepareTailoredInterview: () => Promise<Question[]>;
+  createInterviewFromDraft: () => Promise<InterviewSession>;
   activeSession: InterviewSession;
   activeQuestion: Question;
   latestFeedback: QuestionFeedback | null;
@@ -48,29 +68,34 @@ interface InterviewContextType {
   startTimer: () => void;
   pauseTimer: () => void;
   resetTimer: () => void;
-  createInterviewFromDraft: () => Promise<InterviewSession>;
   loadSession: (sessionId: string) => Promise<void>;
   submitCandidateAnswer: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => Promise<QuestionFeedback>;
   advanceToNextQuestion: () => Promise<boolean>;
   getReport: (sessionId?: string) => Promise<FinalReport>;
+  terminateActiveSession: (reason?: string) => Promise<void>;
 }
 
 const defaultSetupDraft: SetupDraft = {
-  resumeName: sampleResume.fileName,
-  resumeFileSize: sampleResume.fileSize,
-  resumeParsed: true,
-  jobTitle: 'Product Manager Intern',
-  company: 'Acme Corp',
+  resumeName: '',
+  resumeFileSize: '',
+  resumeParsed: false,
+  candidateProfile: null,
+  jobTitle: '',
+  company: '',
+  jobDescriptionText: '',
+  jobProfile: null,
+  companyResearch: null,
+  matchAnalysis: null,
   interviewType: 'mixed',
   difficulty: 'intermediate',
-  durationMinutes: 30,
-  jobDescriptionText: 'We are seeking a Product Manager Intern at Acme Corp to help discover user friction points, write PRDs, run experimentation funnels, and collaborate across engineering and UX design.',
+  durationMinutes: 20,
+  interviewStyle: 'realistic',
   focusAreas: [
-    'Product Strategy & Design',
-    'Behavioral & Cross-functional Leadership',
-    'Analytical Reasoning & Guardrails',
-    'Resume Deep Dive on Prior Deliverables'
-  ]
+    'Product Sense & User Problem Breakdown',
+    'Behavioral & Leadership (STAR Framework)',
+    'Execution, Trade-offs & Sprint Delivery',
+  ],
+  tailoredQuestions: [],
 };
 
 const InterviewContext = createContext<InterviewContextType | undefined>(undefined);
@@ -79,7 +104,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const { user, isAuthenticated } = useUser();
 
   const [setupDraft, setSetupDraft] = useState<SetupDraft>(() => 
-    storage.get('setup_draft', defaultSetupDraft)
+    storage.get('setup_draft_v2', defaultSetupDraft)
   );
 
   const [activeSession, setActiveSession] = useState<InterviewSession>(() => 
@@ -96,44 +121,143 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const updateSetupDraft = (updates: Partial<SetupDraft>) => {
     setSetupDraft((prev) => {
       const updated = { ...prev, ...updates };
-      storage.set('setup_draft', updated);
+      storage.set('setup_draft_v2', updated);
       return updated;
     });
   };
 
   const resetSetupDraft = () => {
     setSetupDraft(defaultSetupDraft);
-    storage.set('setup_draft', defaultSetupDraft);
+    storage.set('setup_draft_v2', defaultSetupDraft);
   };
 
-  const uploadResumeFile = async (file: File): Promise<{ resumeId: string; fileName: string; fileSize: string }> => {
+  const uploadResumeFile = async (file: File) => {
+    const record = await resumeService.uploadResume(file);
+    const profile = await aiService.extractResumeProfile(file.name, file.size);
+
+    updateSetupDraft({
+      resumeId: record.id,
+      resumeName: record.fileName,
+      resumeFileSize: record.fileSizeFormatted,
+      resumeParsed: true,
+      candidateProfile: profile,
+    });
+
+    return {
+      resumeId: record.id,
+      fileName: record.fileName,
+      fileSize: record.fileSizeFormatted,
+      profile,
+    };
+  };
+
+  const analyzeJobDescription = async (title: string, company: string, rawText: string): Promise<JobProfile> => {
+    const parsedJob = await aiService.analyzeJobDescription(title, company, rawText);
+
+    let savedId = setupDraft.jobDescriptionId;
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-      const record = await resumeService.uploadAndCreateResume(user.id, file);
-      updateSetupDraft({
-        resumeId: record.id,
-        resumeName: record.originalFilename,
-        resumeFileSize: record.fileSizeFormatted,
-        resumeParsed: true,
-      });
-      return {
-        resumeId: record.id,
-        fileName: record.originalFilename,
-        fileSize: record.fileSizeFormatted,
-      };
-    } else {
-      // Fallback for demo state
-      const fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-      updateSetupDraft({
-        resumeName: file.name,
-        resumeFileSize: fileSize,
-        resumeParsed: true,
-      });
-      return {
-        resumeId: 'mock_resume_id',
-        fileName: file.name,
-        fileSize,
-      };
+      try {
+        const jdRecord = await jobDescriptionService.saveJobDescription({
+          id: setupDraft.jobDescriptionId,
+          title,
+          company,
+          rawDescription: rawText,
+          parsedRequirements: parsedJob,
+        });
+        savedId = jdRecord.id;
+      } catch (err) {
+        console.error('Error saving JD to Supabase:', err);
+      }
     }
+
+    updateSetupDraft({
+      jobTitle: title,
+      company,
+      jobDescriptionText: rawText,
+      jobDescriptionId: savedId,
+      jobProfile: parsedJob,
+    });
+
+    return parsedJob;
+  };
+
+  const researchCompanyContext = async (companyName: string, role: string): Promise<CompanyResearchData> => {
+    let researchData: CompanyResearchData | null = await companyResearchService.getCachedResearch(companyName, role);
+    if (!researchData) {
+      const generated = await aiService.researchCompany(companyName, role);
+      researchData = generated;
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+        try {
+          researchData = await companyResearchService.saveCompanyResearch(generated);
+        } catch (err) {
+          console.error('Error saving company research to Supabase:', err);
+        }
+      }
+    }
+
+    const finalResearch: CompanyResearchData = researchData;
+
+    // Automatically compute or refresh MatchAnalysis if candidate and job exist
+    if (setupDraft.candidateProfile && setupDraft.jobProfile) {
+      const match = matchAnalysisService.computeMatch(
+        setupDraft.candidateProfile,
+        setupDraft.jobProfile,
+        finalResearch
+      );
+      updateSetupDraft({
+        companyResearch: finalResearch,
+        companyResearchId: finalResearch.id,
+        matchAnalysis: match,
+      });
+    } else {
+      updateSetupDraft({
+        companyResearch: finalResearch,
+        companyResearchId: finalResearch.id,
+      });
+    }
+
+    return finalResearch;
+  };
+
+  const updateGapPriority = (gapId: string, priority: GapPriority) => {
+    if (!setupDraft.matchAnalysis) return;
+    const updatedGaps = setupDraft.matchAnalysis.actionableGaps.map((g) =>
+      g.gapId === gapId ? { ...g, priority } : g
+    );
+    const updatedMatch: MatchAnalysisResult = {
+      ...setupDraft.matchAnalysis,
+      actionableGaps: updatedGaps,
+    };
+    updateSetupDraft({ matchAnalysis: updatedMatch });
+  };
+
+  const prepareTailoredInterview = async (): Promise<Question[]> => {
+    const candidate = setupDraft.candidateProfile || (await aiService.extractResumeProfile(setupDraft.resumeName || 'Resume.pdf'));
+    const job = setupDraft.jobProfile || (await aiService.analyzeJobDescription(setupDraft.jobTitle || 'Role', setupDraft.company || 'Company', setupDraft.jobDescriptionText));
+    const company = setupDraft.companyResearch;
+    const match = setupDraft.matchAnalysis || matchAnalysisService.computeMatch(candidate, job, company);
+
+    const questions = await aiService.prepareInterview({
+      resume: candidate,
+      job,
+      company,
+      match,
+      settings: {
+        role: setupDraft.jobTitle || job.role,
+        company: setupDraft.company || job.company,
+        difficulty: setupDraft.difficulty,
+        duration: setupDraft.durationMinutes,
+        focusAreas: setupDraft.focusAreas,
+        style: setupDraft.interviewStyle,
+      },
+    });
+
+    updateSetupDraft({
+      tailoredQuestions: questions,
+      matchAnalysis: match,
+    });
+
+    return questions;
   };
 
   const startTimer = () => setIsTimerRunning(true);
@@ -141,6 +265,10 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const resetTimer = () => setTimerSeconds(0);
 
   const createInterviewFromDraft = async (): Promise<InterviewSession> => {
+    const questionsToUse = setupDraft.tailoredQuestions && setupDraft.tailoredQuestions.length > 0
+      ? setupDraft.tailoredQuestions
+      : await prepareTailoredInterview();
+
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
       const session = await interviewService.createInterview({
         userId: user.id,
@@ -149,11 +277,15 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         interviewType: setupDraft.interviewType,
         difficulty: setupDraft.difficulty,
         durationMinutes: setupDraft.durationMinutes,
+        interviewStyle: setupDraft.interviewStyle,
         jobDescriptionText: setupDraft.jobDescriptionText,
-        resumeName: setupDraft.resumeName,
+        resumeName: setupDraft.resumeName || 'Candidate_Resume.pdf',
         resumeId: setupDraft.resumeId,
         jobDescriptionId: setupDraft.jobDescriptionId,
+        companyResearchId: setupDraft.companyResearchId,
         focusAreas: setupDraft.focusAreas,
+        matchAnalysis: setupDraft.matchAnalysis as unknown as Record<string, unknown>,
+        questions: questionsToUse,
       });
       setActiveSession(session);
       storage.set('current_session', session);
@@ -164,13 +296,16 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const fallbackSession: InterviewSession = {
         ...sampleActiveSession,
         id: `sess_${Date.now()}`,
-        jobTitle: setupDraft.jobTitle,
-        company: setupDraft.company,
+        jobTitle: setupDraft.jobTitle || 'Product Lead',
+        company: setupDraft.company || 'Target Company',
         interviewType: setupDraft.interviewType,
         difficulty: setupDraft.difficulty,
         durationMinutes: setupDraft.durationMinutes,
-        resumeName: setupDraft.resumeName,
+        interviewStyle: setupDraft.interviewStyle,
+        resumeName: setupDraft.resumeName || 'Resume.pdf',
         jobDescriptionText: setupDraft.jobDescriptionText,
+        questions: questionsToUse,
+        focusAreas: setupDraft.focusAreas,
       };
       setActiveSession(fallbackSession);
       storage.set('current_session', fallbackSession);
@@ -208,7 +343,6 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       let feedback: QuestionFeedback;
 
       if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_acme')) {
-        // 1. Submit answer to Supabase answers table
         const { answerId } = await interviewService.submitAnswer(
           user.id,
           activeSession.id,
@@ -218,7 +352,6 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           durationSecs
         );
 
-        // 2. Evaluate answer deterministically and save in evaluations table
         feedback = await evaluationService.evaluateAndSaveAnswer({
           userId: user.id,
           interviewId: activeSession.id,
@@ -338,6 +471,28 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return sampleFinalReport;
   };
 
+  const terminateActiveSession = async () => {
+    setActiveSession((prev) => {
+      const updated: InterviewSession = { ...prev, status: 'failed' };
+      storage.set('current_session', updated);
+      return updated;
+    });
+    setIsTimerRunning(false);
+
+    if (isAuthenticated && user?.id && activeSession?.id && !user.id.startsWith('mock_')) {
+      try {
+        await interviewService.updateSessionProgress(
+          user.id,
+          activeSession.id,
+          activeSession.currentQuestionIndex,
+          'failed'
+        );
+      } catch (err) {
+        console.error('Error terminating session in Supabase:', err);
+      }
+    }
+  };
+
   return (
     <InterviewContext.Provider
       value={{
@@ -345,6 +500,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         updateSetupDraft,
         resetSetupDraft,
         uploadResumeFile,
+        analyzeJobDescription,
+        researchCompanyContext,
+        updateGapPriority,
+        prepareTailoredInterview,
+        createInterviewFromDraft,
         activeSession,
         activeQuestion,
         latestFeedback,
@@ -356,11 +516,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         startTimer,
         pauseTimer,
         resetTimer,
-        createInterviewFromDraft,
         loadSession,
         submitCandidateAnswer,
         advanceToNextQuestion,
         getReport,
+        terminateActiveSession,
       }}
     >
       {children}

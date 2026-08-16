@@ -7,6 +7,9 @@ export type Json =
   | Json[]
 
 export type Database = {
+  __InternalSupabase: {
+    PostgrestVersion: "14.15"
+  }
   public: {
     Tables: {
       answers: {
@@ -57,6 +60,68 @@ export type Database = {
           },
           {
             foreignKeyName: "answers_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_research: {
+        Row: {
+          business_model: string | null
+          company_name: string
+          created_at: string
+          id: string
+          overview: string | null
+          products: Json | null
+          researched_at: string
+          role: string
+          sources: Json | null
+          status: string
+          strategic_inferences: Json | null
+          unavailable_information: Json | null
+          updated_at: string
+          user_id: string
+          verified_facts: Json | null
+        }
+        Insert: {
+          business_model?: string | null
+          company_name: string
+          created_at?: string
+          id?: string
+          overview?: string | null
+          products?: Json | null
+          researched_at?: string
+          role: string
+          sources?: Json | null
+          status?: string
+          strategic_inferences?: Json | null
+          unavailable_information?: Json | null
+          updated_at?: string
+          user_id: string
+          verified_facts?: Json | null
+        }
+        Update: {
+          business_model?: string | null
+          company_name?: string
+          created_at?: string
+          id?: string
+          overview?: string | null
+          products?: Json | null
+          researched_at?: string
+          role?: string
+          sources?: Json | null
+          status?: string
+          strategic_inferences?: Json | null
+          unavailable_information?: Json | null
+          updated_at?: string
+          user_id?: string
+          verified_facts?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_research_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -164,6 +229,7 @@ export type Database = {
       interviews: {
         Row: {
           company: string
+          company_research_id: string | null
           completed_at: string | null
           created_at: string
           current_question_index: number
@@ -172,8 +238,11 @@ export type Database = {
           final_report: Json | null
           focus_areas: string[] | null
           id: string
+          interview_plan: Json | null
+          interview_style: string | null
           interview_type: string
           job_description_id: string | null
+          match_analysis: Json | null
           overall_score: number | null
           processing_completed_at: string | null
           processing_error: string | null
@@ -187,6 +256,7 @@ export type Database = {
         }
         Insert: {
           company: string
+          company_research_id?: string | null
           completed_at?: string | null
           created_at?: string
           current_question_index?: number
@@ -195,8 +265,11 @@ export type Database = {
           final_report?: Json | null
           focus_areas?: string[] | null
           id?: string
+          interview_plan?: Json | null
+          interview_style?: string | null
           interview_type: string
           job_description_id?: string | null
+          match_analysis?: Json | null
           overall_score?: number | null
           processing_completed_at?: string | null
           processing_error?: string | null
@@ -210,6 +283,7 @@ export type Database = {
         }
         Update: {
           company?: string
+          company_research_id?: string | null
           completed_at?: string | null
           created_at?: string
           current_question_index?: number
@@ -218,8 +292,11 @@ export type Database = {
           final_report?: Json | null
           focus_areas?: string[] | null
           id?: string
+          interview_plan?: Json | null
+          interview_style?: string | null
           interview_type?: string
           job_description_id?: string | null
+          match_analysis?: Json | null
           overall_score?: number | null
           processing_completed_at?: string | null
           processing_error?: string | null
@@ -232,6 +309,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "interviews_company_research_id_fkey"
+            columns: ["company_research_id"]
+            isOneToOne: false
+            referencedRelation: "company_research"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "interviews_job_description_id_fkey"
             columns: ["job_description_id"]
@@ -364,50 +448,62 @@ export type Database = {
       }
       questions: {
         Row: {
+          adaptive_follow_up_triggers: Json | null
           category: string
           context_explanation: string | null
           created_at: string
           difficulty: string
           evaluation_criteria: Json | null
+          expected_signals: Json | null
           id: string
+          intent: string | null
           interview_id: string
           is_follow_up: boolean | null
           parent_question_id: string | null
           question_text: string
           question_type: string
           recommended_duration_seconds: number | null
+          red_flags: Json | null
           sample_answer: string | null
           sequence_order: number
         }
         Insert: {
+          adaptive_follow_up_triggers?: Json | null
           category: string
           context_explanation?: string | null
           created_at?: string
           difficulty: string
           evaluation_criteria?: Json | null
+          expected_signals?: Json | null
           id?: string
+          intent?: string | null
           interview_id: string
           is_follow_up?: boolean | null
           parent_question_id?: string | null
           question_text: string
           question_type?: string
           recommended_duration_seconds?: number | null
+          red_flags?: Json | null
           sample_answer?: string | null
           sequence_order: number
         }
         Update: {
+          adaptive_follow_up_triggers?: Json | null
           category?: string
           context_explanation?: string | null
           created_at?: string
           difficulty?: string
           evaluation_criteria?: Json | null
+          expected_signals?: Json | null
           id?: string
+          intent?: string | null
           interview_id?: string
           is_follow_up?: boolean | null
           parent_question_id?: string | null
           question_text?: string
           question_type?: string
           recommended_duration_seconds?: number | null
+          red_flags?: Json | null
           sample_answer?: string | null
           sequence_order?: number
         }
@@ -431,8 +527,11 @@ export type Database = {
       resumes: {
         Row: {
           created_at: string
+          extracted_profile: Json | null
+          file_name: string | null
           file_size_bytes: number | null
           file_size_formatted: string | null
+          file_type: string | null
           id: string
           original_filename: string
           parsed_data: Json | null
@@ -446,8 +545,11 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          extracted_profile?: Json | null
+          file_name?: string | null
           file_size_bytes?: number | null
           file_size_formatted?: string | null
+          file_type?: string | null
           id?: string
           original_filename: string
           parsed_data?: Json | null
@@ -461,8 +563,11 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          extracted_profile?: Json | null
+          file_name?: string | null
           file_size_bytes?: number | null
           file_size_formatted?: string | null
+          file_type?: string | null
           id?: string
           original_filename?: string
           parsed_data?: Json | null
@@ -499,3 +604,35 @@ export type Database = {
     }
   }
 }
+
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
+
+export type Tables<
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals
+  }
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      Row: infer R
+    }
+    ? R
+    : never
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never

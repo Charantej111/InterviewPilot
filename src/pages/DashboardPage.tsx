@@ -6,20 +6,31 @@ import { RecentInterviewsTable, InterviewRecord } from '../components/dashboard/
 import { Folder } from '../components/reactbits/Folder';
 import { Button } from '../components/ui/Button';
 import { ShiningText } from '../components/ui/ShiningText';
-import { Plus, Flame } from 'lucide-react';
+import { Plus, Flame, Play, ArrowRight } from 'lucide-react';
 import { useUser } from '../context/UserContext';
+import { useInterview } from '../context/InterviewContext';
 import { interviewService } from '../services/supabase/interviewService';
+import { InterviewSession } from '../types/interview';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useUser();
+  const { loadSession } = useInterview();
   const [recentInterviews, setRecentInterviews] = useState<InterviewRecord[]>([]);
+  const [activeInProgressSession, setActiveInProgressSession] = useState<InterviewSession | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-    const loadInterviews = async () => {
+    const loadDashboardData = async () => {
       if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
         try {
+          // 1. Load active in-progress session
+          const active = await interviewService.getActiveInterview(user.id);
+          if (isMounted && active) {
+            setActiveInProgressSession(active);
+          }
+
+          // 2. Load recent interviews
           const list = await interviewService.getRecentInterviews(user.id);
           if (isMounted && list.length > 0) {
             setRecentInterviews(list);
@@ -29,11 +40,17 @@ export const DashboardPage: React.FC = () => {
         }
       }
     };
-    loadInterviews();
+    loadDashboardData();
     return () => {
       isMounted = false;
     };
   }, [isAuthenticated, user?.id]);
+
+  const handleResumeInterview = async () => {
+    if (!activeInProgressSession) return;
+    await loadSession(activeInProgressSession.id);
+    navigate(`/interview/${activeInProgressSession.id}`);
+  };
 
   const improvementAreas = [
     { label: 'Structure (STAR Framework)', status: 'Needs work', variant: 'warning' },
@@ -60,8 +77,40 @@ export const DashboardPage: React.FC = () => {
   return (
     <DashboardLayout>
       <div className="space-y-8 max-w-5xl mx-auto">
+        {/* ACTIVE IN-PROGRESS RESUME BANNER */}
+        {activeInProgressSession && (
+          <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fadeIn text-left">
+            <div className="flex items-center gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 dark:text-purple-600 flex items-center justify-center shrink-0">
+                <Play size={18} className="fill-current" />
+              </div>
+              <div>
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-400 dark:text-purple-600 mb-0.5">
+                  <span className="w-2 h-2 rounded-full bg-purple-400 dark:bg-purple-600 animate-pulse" />
+                  <span>Interview in progress</span>
+                </div>
+                <h3 className="text-base font-extrabold truncate max-w-md">
+                  {activeInProgressSession.jobTitle} · {activeInProgressSession.company}
+                </h3>
+                <p className="text-xs opacity-75 mt-0.5">
+                  Question {(activeInProgressSession.currentQuestionIndex || 0) + 1} of {activeInProgressSession.questions.length} • All past responses preserved
+                </p>
+              </div>
+            </div>
+
+            <Button
+              size="md"
+              onClick={handleResumeInterview}
+              rightIcon={<ArrowRight size={15} />}
+              className="bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-md self-start sm:self-auto shrink-0"
+            >
+              Resume Interview
+            </Button>
+          </div>
+        )}
+
         {/* Header Greeting Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 sm:p-7 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 sm:p-7 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm text-left">
           <div className="flex items-center gap-4">
             <div className="hidden sm:block">
               <Folder
@@ -74,7 +123,7 @@ export const DashboardPage: React.FC = () => {
                 ]}
               />
             </div>
-            <div className="text-left">
+            <div>
               <div className="inline-flex items-center gap-1.5 text-xs text-zinc-500 font-medium mb-1">
                 <span>Workspace</span>
                 <span>•</span>

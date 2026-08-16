@@ -1,345 +1,431 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import { useInterview } from '../context/InterviewContext';
-import { AnimatedAIChat } from '../components/ui/AnimatedAIChat';
-import { ShiningText } from '../components/ui/ShiningText';
 import { Button } from '../components/ui/Button';
-import { LetterLoader } from '../components/ui/LetterLoader';
-import { CustomDropdown } from '../components/ui/CustomDropdown';
-import { Folder } from '../components/reactbits/Folder';
+import { ShiningText } from '../components/ui/ShiningText';
+import { AILoader } from '../components/ui/AILoader';
+import { InterviewDifficulty, InterviewDuration, InterviewStyle } from '../types/interview';
 import { 
-  Sparkles, 
-  CheckCircle2, 
+  FileText, 
+  UploadCloud, 
+  RefreshCw, 
   ArrowRight, 
-  Target, 
+  ArrowLeft, 
+  Play, 
   Building2, 
   Briefcase, 
-  Sliders, 
-  Clock, 
-  Zap,
-  Gauge
+  AlertCircle,
+  Clock,
+  Flame,
+  UserCheck
 } from 'lucide-react';
-import { InterviewType, InterviewDifficulty, InterviewDuration } from '../types/interview';
-
-const ANALYSIS_STAGES = [
-  'Deconstructing job requirements & tech stack...',
-  'Extracting core technical & behavioral competencies...',
-  'Calibrating hiring bar to industry benchmarks...',
-  'Synthesizing tailored adaptive interview probes...',
-];
-
-const DIFFICULTY_OPTIONS = [
-  { value: 'beginner' as InterviewDifficulty, label: 'Entry Level', description: 'Foundational & baseline probes' },
-  { value: 'intermediate' as InterviewDifficulty, label: 'Senior / Lead', description: 'Trade-offs & STAR depth' },
-  { value: 'advanced' as InterviewDifficulty, label: 'Staff / Principal', description: 'System scale & edge pressure' },
-];
-
-const DURATION_OPTIONS = [
-  { value: 15 as InterviewDuration, label: '15 Mins (3-4 Qs)', description: 'Quick focused pulse' },
-  { value: 30 as InterviewDuration, label: '30 Mins (5-6 Qs)', description: 'Standard interview loop' },
-  { value: 45 as InterviewDuration, label: '45 Mins (Full Loop)', description: 'Comprehensive simulation' },
-];
-
-const FORMAT_OPTIONS = [
-  { value: 'mixed' as InterviewType, label: 'Mixed Loop', description: 'Technical, behavioral & product' },
-  { value: 'behavioral' as InterviewType, label: 'Behavioral', description: 'Leadership & STAR methodology' },
-  { value: 'product_case' as InterviewType, label: 'Product Case', description: 'Strategy & funnel execution' },
-  { value: 'technical' as InterviewType, label: 'Technical', description: 'System design & architecture' },
-];
+import { cn } from '../lib/utils';
 
 export const SetupPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setupDraft, updateSetupDraft, uploadResumeFile, createInterviewFromDraft } = useInterview();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const {
+    setupDraft,
+    updateSetupDraft,
+    uploadResumeFile,
+    analyzeJobDescription,
+    researchCompanyContext,
+    prepareTailoredInterview,
+    createInterviewFromDraft,
+  } = useInterview();
 
-  const [inputPrompt, setInputPrompt] = useState(
-    setupDraft.jobDescriptionText || ''
-  );
-  const [attachedFile, setAttachedFile] = useState<{ name: string; size?: string } | null>(
-    setupDraft.resumeName ? { name: setupDraft.resumeName, size: setupDraft.resumeFileSize } : null
-  );
-  const [targetCompany, setTargetCompany] = useState(setupDraft.company || 'Stripe');
-  const [targetRole, setTargetRole] = useState(setupDraft.jobTitle || 'Senior Product Manager');
-  const [interviewType, setInterviewType] = useState<InterviewType>(setupDraft.interviewType || 'mixed');
-  const [difficulty, setDifficulty] = useState<InterviewDifficulty>(setupDraft.difficulty || 'intermediate');
-  const [duration, setDuration] = useState<InterviewDuration>(setupDraft.durationMinutes || 30);
-  
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisStageIdx, setAnalysisStageIdx] = useState(0);
-  const [analyzedBlueprint, setAnalyzedBlueprint] = useState<{
-    competencies: string[];
-    sampleQuestions: string[];
-    hiringBar: string;
-  } | null>(null);
+  const [mode, setMode] = useState<'input' | 'ready'>('input');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStage, setProcessingStage] = useState('Extracting resume & job signals...');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
-  useEffect(() => {
-    if (!isAnalyzing) return;
-    const interval = setInterval(() => {
-      setAnalysisStageIdx((prev) => (prev + 1) % ANALYSIS_STAGES.length);
-    }, 450);
-    return () => clearInterval(interval);
-  }, [isAnalyzing]);
-
-  const handleFileSelect = async (file: File) => {
-    const fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
-    setAttachedFile({ name: file.name, size: fileSize });
+  // Resume Upload Handler
+  const handleFileUpload = async (file: File) => {
+    setErrorMessage(null);
     try {
       await uploadResumeFile(file);
-    } catch (err) {
-      console.error('Error uploading resume:', err);
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      setErrorMessage(err.message || 'Failed to upload resume document.');
     }
   };
 
-  const handleRemoveFile = () => {
-    setAttachedFile(null);
-    updateSetupDraft({
-      resumeName: '',
-      resumeFileSize: '',
-      resumeParsed: false,
-    });
+  // One-Click Calibrate & Prepare
+  const handleCalibrateAndPrepare = async () => {
+    if (!setupDraft.jobTitle.trim() || !setupDraft.company.trim()) {
+      setErrorMessage('Please enter both the target role and company name.');
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsProcessing(true);
+
+    try {
+      // 1. Analyze JD
+      setProcessingStage('Deconstructing job requirements...');
+      const jdText = setupDraft.jobDescriptionText.trim() || `${setupDraft.jobTitle} at ${setupDraft.company}`;
+      await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
+
+      // 2. Company Research
+      setProcessingStage(`Gathering ${setupDraft.company} context...`);
+      await researchCompanyContext(setupDraft.company, setupDraft.jobTitle);
+
+      // 3. Prepare tailored interview
+      setProcessingStage('Calibrating personalized interview probes...');
+      await prepareTailoredInterview();
+
+      setMode('ready');
+    } catch (err: any) {
+      console.error('Calibration error:', err);
+      setErrorMessage(err.message || 'Failed to prepare interview simulation.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const handleAnalyzeAndGenerate = async () => {
-    if (!inputPrompt.trim() && !attachedFile) return;
-
-    setIsAnalyzing(true);
-    setAnalysisStageIdx(0);
-    updateSetupDraft({
-      jobTitle: targetRole,
-      company: targetCompany,
-      interviewType: interviewType,
-      difficulty: difficulty,
-      durationMinutes: duration,
-      jobDescriptionText: inputPrompt,
-      focusAreas: ['Product Strategy & Funnel Optimization', 'Metric Evidence & STAR Framework', 'System Scalability & Prioritization'],
-    });
-
-    // Simulate multi-stage AI reasoning
-    await new Promise((r) => setTimeout(r, 1600));
-
-    setAnalyzedBlueprint({
-      competencies: [
-        'Funnel Drop-off Analysis & Quantitative Prioritization',
-        'Cross-Functional Engineering & Design Alignment',
-        'Technical Trade-offs & Experimentation Velocity',
-        'Senior Stakeholder Communication Under Pressure',
-      ],
-      sampleQuestions: [
-        'How did you isolate the friction point in the user onboarding funnel?',
-        'Describe a time you deprioritized a highly requested stakeholder feature.',
-        'Walk through how you scale a feature architecture when query latency spikes 4x.',
-      ],
-      hiringBar: `Calibrated to ${difficulty === 'advanced' ? 'Staff / Lead' : difficulty === 'intermediate' ? 'Senior' : 'Mid-Level'} Benchmark`,
-    });
-
-    setIsAnalyzing(false);
-  };
-
-  const handleLaunchSession = async () => {
-    setIsAnalyzing(true);
+  // Launch Simulation
+  const handleLaunchSimulation = async () => {
+    setIsProcessing(true);
     try {
       const session = await createInterviewFromDraft();
       navigate('/interview/preview', { state: { sessionId: session.id } });
-    } finally {
-      setIsAnalyzing(false);
+    } catch (err: any) {
+      console.error('Launch error:', err);
+      setErrorMessage(err.message || 'Failed to start interview.');
+      setIsProcessing(false);
     }
   };
 
   return (
     <DashboardLayout>
-      <div className="max-w-4xl mx-auto space-y-8">
-        {/* Page Header */}
-        <div className="space-y-1.5 text-left">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs font-semibold border border-zinc-200 dark:border-zinc-700">
-            <Zap size={13} className="text-zinc-500" />
-            <span>AI Calibration Cockpit</span>
-          </div>
+      <div className="max-w-3xl mx-auto space-y-6 text-left pb-16">
+        {/* Hidden Native File Input */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileUpload(file);
+          }}
+          accept=".pdf,.doc,.docx"
+          className="hidden"
+        />
+
+        {/* Header */}
+        <div className="space-y-1">
           <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
-            <ShiningText text="Paste Job Description to Analyze" />
+            <ShiningText text={mode === 'input' ? 'Start Mock Interview' : 'Simulation Brief'} />
           </h1>
           <p className="text-xs sm:text-sm text-foreground-muted">
-            Attach your resume and paste your target job requirements. The AI will instantly analyze core competencies and formulate your live interview loop.
+            {mode === 'input'
+              ? 'Calibrate your simulation based on the specific job posting and company you want to practice for.'
+              : `Ready to simulate your interview for ${setupDraft.jobTitle} at ${setupDraft.company}.`}
           </p>
         </div>
 
-        {/* Animated AI Chat Input Cockpit (by jatin-yadav05) */}
-        <div className="space-y-4">
-          <AnimatedAIChat
-            value={inputPrompt}
-            onChange={setInputPrompt}
-            onSubmit={handleAnalyzeAndGenerate}
-            onFileSelect={handleFileSelect}
-            attachedFile={attachedFile}
-            onRemoveFile={handleRemoveFile}
-            placeholder="Paste your target job description, requirements, or enter target role to analyze..."
-            isLoading={isAnalyzing}
+        {/* Error Notification */}
+        {errorMessage && (
+          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center gap-2 animate-fadeIn">
+            <AlertCircle size={15} className="shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* PROCESSING LOADER STATE */}
+        {isProcessing && (
+          <AILoader
+            title="Calibrating Simulation Engine"
+            stage={processingStage}
           />
-        </div>
+        )}
 
-        {/* Calibration Settings Grid */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-left">
-          {/* Target Role */}
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted flex items-center gap-1">
-              <Briefcase size={12} className="text-zinc-400" /> Target Role
-            </label>
-            <input
-              type="text"
-              value={targetRole}
-              onChange={(e) => setTargetRole(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs font-semibold text-foreground outline-none focus:border-zinc-400"
-              placeholder="e.g. Senior Product Manager"
-            />
-          </div>
-
-          {/* Target Company */}
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-foreground-muted flex items-center gap-1">
-              <Building2 size={12} className="text-zinc-400" /> Company
-            </label>
-            <input
-              type="text"
-              value={targetCompany}
-              onChange={(e) => setTargetCompany(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs font-semibold text-foreground outline-none focus:border-zinc-400"
-              placeholder="e.g. Stripe, Acme Corp"
-            />
-          </div>
-
-          {/* Custom Difficulty Bar Dropdown */}
-          <div>
-            <CustomDropdown<InterviewDifficulty>
-              label="Difficulty Bar"
-              icon={Gauge}
-              options={DIFFICULTY_OPTIONS}
-              value={difficulty}
-              onChange={setDifficulty}
-            />
-          </div>
-
-          {/* Custom Duration Selector Dropdown */}
-          <div>
-            <CustomDropdown<InterviewDuration>
-              label="Duration"
-              icon={Clock}
-              options={DURATION_OPTIONS}
-              value={duration}
-              onChange={setDuration}
-            />
-          </div>
-
-          {/* Custom Interview Loop Format Dropdown */}
-          <div>
-            <CustomDropdown<InterviewType>
-              label="Format"
-              icon={Sliders}
-              options={FORMAT_OPTIONS}
-              value={interviewType}
-              onChange={setInterviewType}
-            />
-          </div>
-        </div>
-
-        {/* Loading Analyzing State with 3D Plasma Sphere & Progressive Reasoning Stream */}
-        {isAnalyzing && (
-          <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
-            <LetterLoader text="Analyzing" size="md" />
-            <div className="space-y-1.5 max-w-lg px-4">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-900 dark:bg-zinc-800 text-white text-xs font-medium border border-zinc-700 shadow-sm">
-                <Sparkles size={12} className="text-purple-400 animate-spin" />
-                <ShiningText text={ANALYSIS_STAGES[analysisStageIdx]} />
+        {/* MODE 1: SETUP & CONTEXT INPUT */}
+        {mode === 'input' && !isProcessing && (
+          <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6 animate-fadeIn">
+            {/* Target Role & Target Company from JD */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Briefcase size={13} className="text-zinc-400" />
+                    <span>Role Title (from Job Posting)</span>
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={setupDraft.jobTitle}
+                  onChange={(e) => updateSetupDraft({ jobTitle: e.target.value })}
+                  placeholder="e.g. Product Manager Intern"
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-foreground outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
+                />
+                <span className="text-[10px] text-foreground-muted block">The exact job title you are interviewing for</span>
               </div>
-              <p className="text-[11px] text-foreground-muted font-mono pt-1">
-                Synthesizing personalized question sequence & rubric weights...
-              </p>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Building2 size={13} className="text-zinc-400" />
+                    <span>Company Hiring for this Role</span>
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={setupDraft.company}
+                  onChange={(e) => updateSetupDraft({ company: e.target.value })}
+                  placeholder="e.g. Google, Stripe, Linear"
+                  className="w-full bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-foreground outline-none focus:border-zinc-400 dark:focus:border-zinc-500"
+                />
+                <span className="text-[10px] text-foreground-muted block">The company hiring for this opening (from the JD)</span>
+              </div>
+            </div>
+
+            {/* Resume Upload Chip or Dropzone */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                <FileText size={13} className="text-zinc-400" />
+                <span>Your Resume (PDF / DOCX)</span>
+              </label>
+
+              {setupDraft.resumeName ? (
+                <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center text-xs font-bold">
+                      <FileText size={14} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground truncate max-w-[240px]">
+                        {setupDraft.resumeName}
+                      </h4>
+                      <p className="text-[10px] text-foreground-muted font-medium">
+                        {setupDraft.resumeFileSize || 'Resume Attached'} • Profile Ready
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-foreground-muted hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Replace</span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(true);
+                  }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleFileUpload(file);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={cn(
+                    'p-6 rounded-2xl border border-dashed transition-all text-center cursor-pointer',
+                    isDragOver
+                      ? 'border-primary bg-primary/5 dark:bg-primary/10'
+                      : 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/40 hover:border-zinc-400'
+                  )}
+                >
+                  <UploadCloud size={22} className="mx-auto mb-2 text-zinc-400" />
+                  <p className="text-xs font-bold text-foreground">Upload or drag & drop your resume</p>
+                  <p className="text-[10px] text-foreground-muted mt-0.5 font-medium">PDF, DOC, DOCX up to 10 MB</p>
+                </div>
+              )}
+            </div>
+
+            {/* Complete Job Description */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-foreground flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <FileText size={13} className="text-zinc-400" />
+                  <span>Job Description (from the Posting)</span>
+                </span>
+                <span className="text-[10px] font-normal text-foreground-muted">Paste full requirements</span>
+              </label>
+              <textarea
+                rows={5}
+                value={setupDraft.jobDescriptionText}
+                onChange={(e) => updateSetupDraft({ jobDescriptionText: e.target.value })}
+                placeholder="Paste the job description, responsibilities, or specific requirements for this opening..."
+                className="w-full bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-2xl p-3.5 text-xs sm:text-sm text-foreground leading-relaxed outline-none focus:border-zinc-400 dark:focus:border-zinc-500 resize-y"
+              />
+              <span className="text-[10px] text-foreground-muted block">
+                InterviewPilot extracts hiring signals from this text to match against your resume.
+              </span>
+            </div>
+
+            {/* Action Bar */}
+            <div className="pt-2 flex justify-end">
+              <Button
+                type="button"
+                size="lg"
+                onClick={handleCalibrateAndPrepare}
+                rightIcon={<ArrowRight size={16} />}
+                className="w-full sm:w-auto shadow-sm"
+              >
+                Calibrate & Prepare Simulation
+              </Button>
             </div>
           </div>
         )}
 
-        {/* AI Analyzed Blueprint Dossier */}
-        {analyzedBlueprint && !isAnalyzing && (
-          <div className="p-6 sm:p-7 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-md text-left space-y-6 animate-fadeIn">
-            <div className="flex items-start justify-between pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        {/* MODE 2: EXECUTIVE READY BRIEF */}
+        {mode === 'ready' && !isProcessing && (
+          <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6 animate-fadeIn">
+            {/* Header Title Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-zinc-100 dark:border-zinc-800">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">
-                    Analysis Ready
-                  </span>
-                  <span className="text-xs text-foreground-muted font-medium">
-                    {analyzedBlueprint.hiringBar}
+                <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                  Simulation Calibrated
+                </span>
+                <h2 className="text-xl sm:text-2xl font-extrabold text-foreground mt-0.5">
+                  {setupDraft.jobTitle} · {setupDraft.company}
+                </h2>
+              </div>
+
+              {setupDraft.matchAnalysis && (
+                <div className="flex items-baseline gap-1.5 bg-zinc-100 dark:bg-zinc-800 px-3.5 py-1.5 rounded-xl self-start sm:self-auto">
+                  <span className="text-xs text-foreground-muted font-semibold">Match:</span>
+                  <span className="text-sm font-extrabold text-foreground font-mono">
+                    {setupDraft.matchAnalysis.matchPercentage}%
                   </span>
                 </div>
-                <h3 className="text-lg font-extrabold text-foreground mt-1">
-                  {targetRole} · {targetCompany}
-                </h3>
+              )}
+            </div>
+
+            {/* Focus Probes Overview */}
+            {setupDraft.tailoredQuestions && setupDraft.tailoredQuestions.length > 0 && (
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted">
+                  Prepared Anchor Topics ({setupDraft.tailoredQuestions.length})
+                </h4>
+                <div className="space-y-2">
+                  {setupDraft.tailoredQuestions.map((q, idx) => (
+                    <div
+                      key={q.id || idx}
+                      className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/80 text-xs flex items-start gap-2.5"
+                    >
+                      <span className="w-5 h-5 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-foreground">{q.category}</span>
+                        <p className="text-foreground-muted text-[11px] leading-relaxed line-clamp-2">
+                          "{q.text}"
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Segmented Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              {/* Difficulty */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1">
+                  <Flame size={12} className="text-amber-500" />
+                  <span>Difficulty</span>
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                  {(['beginner', 'intermediate', 'advanced'] as InterviewDifficulty[]).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => updateSetupDraft({ difficulty: d })}
+                      className={cn(
+                        'py-1 rounded-lg text-[11px] font-bold capitalize transition-all cursor-pointer text-center',
+                        setupDraft.difficulty === d
+                          ? 'bg-white dark:bg-zinc-900 text-foreground shadow-xs'
+                          : 'text-foreground-muted hover:text-foreground'
+                      )}
+                    >
+                      {d === 'intermediate' ? 'Senior' : d}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* 3D Folder Graphic */}
-              <div className="hidden sm:block">
-                <Folder
-                  color="#18181b"
-                  size={0.8}
-                  items={[
-                    <div key="1" className="p-1 text-[9px] font-bold text-slate-900">Blueprint</div>,
-                    <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">Competencies</div>,
-                    <div key="3" className="p-1 text-[9px] font-bold text-purple-700">Rubric</div>
-                  ]}
-                />
+              {/* Duration */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1">
+                  <Clock size={12} className="text-blue-500" />
+                  <span>Duration</span>
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                  {([10, 20, 30] as InterviewDuration[]).map((dur) => (
+                    <button
+                      key={dur}
+                      type="button"
+                      onClick={() => updateSetupDraft({ durationMinutes: dur })}
+                      className={cn(
+                        'py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer text-center',
+                        setupDraft.durationMinutes === dur
+                          ? 'bg-white dark:bg-zinc-900 text-foreground shadow-xs'
+                          : 'text-foreground-muted hover:text-foreground'
+                      )}
+                    >
+                      {dur}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Style */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1">
+                  <UserCheck size={12} className="text-purple-500" />
+                  <span>Tone</span>
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+                  {(['friendly', 'realistic', 'challenging'] as InterviewStyle[]).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => updateSetupDraft({ interviewStyle: st })}
+                      className={cn(
+                        'py-1 rounded-lg text-[11px] font-bold capitalize transition-all cursor-pointer text-center',
+                        setupDraft.interviewStyle === st
+                          ? 'bg-white dark:bg-zinc-900 text-foreground shadow-xs'
+                          : 'text-foreground-muted hover:text-foreground'
+                      )}
+                    >
+                      {st}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Extracted Core Competencies */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <Target size={13} className="text-zinc-500" />
-                Target Competencies Evaluated:
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {analyzedBlueprint.competencies.map((comp, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 flex items-start gap-2.5 text-xs text-foreground font-medium"
-                  >
-                    <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
-                    <span>{comp}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Generated Question Sequence Sample */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <Sparkles size={13} className="text-zinc-500" />
-                Sample Generated Probes:
-              </span>
-              <div className="space-y-2">
-                {analyzedBlueprint.sampleQuestions.map((q, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 text-xs text-foreground font-medium"
-                  >
-                    <span className="text-zinc-400 font-mono mr-2">Q{idx + 1}.</span>
-                    "{q}"
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Launch Action */}
-            <div className="pt-2 flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800">
-              <div className="flex items-center gap-2 text-xs text-foreground-muted">
-                <Clock size={14} />
-                <span>Estimated duration: <strong>{duration} Minutes</strong></span>
-              </div>
+            {/* Action Bar */}
+            <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800">
+              <Button
+                type="button"
+                variant="outline"
+                size="md"
+                onClick={() => setMode('input')}
+                leftIcon={<ArrowLeft size={15} />}
+              >
+                Edit Setup
+              </Button>
 
               <Button
+                type="button"
                 size="lg"
-                onClick={handleLaunchSession}
-                className="px-6 shadow-sm"
-                rightIcon={<ArrowRight size={15} />}
+                onClick={handleLaunchSimulation}
+                rightIcon={<Play size={15} className="fill-current" />}
+                className="shadow-md"
               >
-                Launch Mock Interview
+                Start Interview Simulation
               </Button>
             </div>
           </div>

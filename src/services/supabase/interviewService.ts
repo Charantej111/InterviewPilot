@@ -6,9 +6,10 @@ import {
   QuestionFeedback, 
   InterviewType, 
   InterviewDifficulty, 
-  InterviewDuration 
+  InterviewDuration,
+  InterviewStyle,
 } from '../../types/interview';
-import { mockQuestions } from '../../data/mockQuestions';
+import { Json } from '../../types/database.types';
 
 export interface CreateInterviewParams {
   userId: string;
@@ -17,11 +18,16 @@ export interface CreateInterviewParams {
   interviewType: InterviewType;
   difficulty: InterviewDifficulty;
   durationMinutes: InterviewDuration;
+  interviewStyle?: InterviewStyle;
   jobDescriptionText: string;
   resumeName: string;
   resumeId?: string;
   jobDescriptionId?: string;
+  companyResearchId?: string;
   focusAreas?: string[];
+  matchAnalysis?: Record<string, unknown>;
+  interviewPlan?: Record<string, unknown>;
+  questions: Question[];
 }
 
 export interface RecentInterviewSummary {
@@ -35,10 +41,10 @@ export interface RecentInterviewSummary {
 
 export const interviewService = {
   /**
-   * Creates a new interview session and persists the initial question set to Supabase.
+   * Creates a new interview session and persists the tailored question set to Supabase.
    */
   async createInterview(params: CreateInterviewParams): Promise<InterviewSession> {
-    const defaultFocus = params.focusAreas || [
+    const defaultFocus = params.focusAreas && params.focusAreas.length > 0 ? params.focusAreas : [
       'Product Strategy & Design',
       'Behavioral & Leadership',
       'Analytical Reasoning',
@@ -55,9 +61,13 @@ export const interviewService = {
         interview_type: params.interviewType,
         difficulty: params.difficulty,
         duration_minutes: params.durationMinutes,
+        interview_style: params.interviewStyle || 'realistic',
         focus_areas: defaultFocus,
         resume_id: params.resumeId || null,
         job_description_id: params.jobDescriptionId || null,
+        company_research_id: params.companyResearchId || null,
+        match_analysis: (params.matchAnalysis as unknown as Json) || null,
+        interview_plan: (params.interviewPlan as unknown as Json) || null,
         status: 'in_progress',
         current_question_index: 0,
         processing_status: 'completed',
@@ -72,19 +82,23 @@ export const interviewService = {
       throw new Error(`Failed to create interview session: ${intError?.message}`);
     }
 
-    // 2. Insert initial questions
-    const questionInserts = mockQuestions.map((q, idx) => ({
+    // 2. Insert tailored questions
+    const questionInserts = params.questions.map((q, idx) => ({
       interview_id: interviewRow.id,
       sequence_order: idx + 1,
       category: q.category,
       difficulty: params.difficulty,
       question_type: q.type || 'initial',
       question_text: q.text,
+      intent: q.intent || null,
       context_explanation: q.contextExplanation || null,
       recommended_duration_seconds: q.recommendedDurationSeconds || 180,
-      sample_answer: q.sampleAnswer || null,
-      evaluation_criteria: (q.expectedKeyPoints ? { expectedKeyPoints: q.expectedKeyPoints } : null) as unknown as import('../../types/database.types').Json,
+      expected_signals: (q.expectedSignals as unknown as Json) || null,
+      red_flags: (q.redFlags as unknown as Json) || null,
+      evaluation_criteria: (q.evaluationCriteria as unknown as Json) || null,
+      adaptive_follow_up_triggers: (q.adaptiveFollowUpTriggers as unknown as Json) || null,
       is_follow_up: q.type === 'follow_up',
+      parent_question_id: q.parentQuestionId || null,
     }));
 
     const { data: createdQuestions, error: qError } = await supabase
@@ -97,17 +111,20 @@ export const interviewService = {
       throw new Error(`Failed to create questions: ${qError.message}`);
     }
 
-    const questions: Question[] = (createdQuestions || []).map((q) => ({
+    const savedQuestions: Question[] = (createdQuestions || []).map((q) => ({
       id: q.id,
       order: q.sequence_order,
       type: (q.question_type as Question['type']) || 'initial',
-      parentQuestionId: q.parent_question_id || undefined,
-      category: q.category as Question['category'],
+      parentQuestionId: q.parent_question_id || null,
+      category: q.category,
       text: q.question_text,
+      intent: q.intent || undefined,
       contextExplanation: q.context_explanation || undefined,
       recommendedDurationSeconds: q.recommended_duration_seconds || 180,
-      sampleAnswer: q.sample_answer || undefined,
-      expectedKeyPoints: ((q.evaluation_criteria as Record<string, unknown>)?.expectedKeyPoints as string[]) || undefined,
+      expectedSignals: (q.expected_signals as unknown as string[]) || undefined,
+      redFlags: (q.red_flags as unknown as string[]) || undefined,
+      evaluationCriteria: (q.evaluation_criteria as unknown as Question['evaluationCriteria']) || undefined,
+      adaptiveFollowUpTriggers: (q.adaptive_follow_up_triggers as unknown as Question['adaptiveFollowUpTriggers']) || undefined,
     }));
 
     return {
@@ -119,10 +136,14 @@ export const interviewService = {
       interviewType: interviewRow.interview_type as InterviewType,
       difficulty: interviewRow.difficulty as InterviewDifficulty,
       durationMinutes: interviewRow.duration_minutes as InterviewDuration,
+      interviewStyle: (interviewRow.interview_style as InterviewStyle) || 'realistic',
       focusAreas: interviewRow.focus_areas || defaultFocus,
       resumeName: params.resumeName,
+      resumeId: params.resumeId,
+      jobDescriptionId: params.jobDescriptionId,
+      companyResearchId: params.companyResearchId,
       jobDescriptionText: params.jobDescriptionText,
-      questions,
+      questions: savedQuestions,
       currentQuestionIndex: 0,
       answers: {},
       feedbacks: {},
@@ -157,13 +178,16 @@ export const interviewService = {
         id: q.id,
         order: q.sequence_order,
         type: (q.question_type as Question['type']) || 'initial',
-        parentQuestionId: q.parent_question_id || undefined,
-        category: q.category as Question['category'],
+        parentQuestionId: q.parent_question_id || null,
+        category: q.category,
         text: q.question_text,
+        intent: q.intent || undefined,
         contextExplanation: q.context_explanation || undefined,
         recommendedDurationSeconds: q.recommended_duration_seconds || 180,
-        sampleAnswer: q.sample_answer || undefined,
-        expectedKeyPoints: ((q.evaluation_criteria as Record<string, unknown>)?.expectedKeyPoints as string[]) || undefined,
+        expectedSignals: (q.expected_signals as unknown as string[]) || undefined,
+        redFlags: (q.red_flags as unknown as string[]) || undefined,
+        evaluationCriteria: (q.evaluation_criteria as unknown as Question['evaluationCriteria']) || undefined,
+        adaptiveFollowUpTriggers: (q.adaptive_follow_up_triggers as unknown as Question['adaptiveFollowUpTriggers']) || undefined,
       }));
 
     const answersMap: Record<string, CandidateAnswer> = {};
@@ -213,8 +237,12 @@ export const interviewService = {
       interviewType: data.interview_type as InterviewType,
       difficulty: data.difficulty as InterviewDifficulty,
       durationMinutes: data.duration_minutes as InterviewDuration,
+      interviewStyle: (data.interview_style as InterviewStyle) || 'realistic',
       focusAreas: data.focus_areas || [],
       resumeName: 'Resume.pdf',
+      resumeId: data.resume_id || undefined,
+      jobDescriptionId: data.job_description_id || undefined,
+      companyResearchId: data.company_research_id || undefined,
       jobDescriptionText: '',
       questions: sortedQuestions,
       currentQuestionIndex: data.current_question_index || 0,
@@ -257,7 +285,7 @@ export const interviewService = {
   },
 
   /**
-   * Updates the current question index or status of an interview.
+   * Updates session progress in Supabase.
    */
   async updateSessionProgress(
     userId: string,
@@ -315,4 +343,22 @@ export const interviewService = {
       status: row.status,
     }));
   },
+
+  /**
+   * Fetches the current active in-progress interview if one exists.
+   */
+  async getActiveInterview(userId: string): Promise<InterviewSession | null> {
+    const { data, error } = await supabase
+      .from('interviews')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'in_progress')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return this.getSessionById(userId, data.id);
+  },
 };
+
