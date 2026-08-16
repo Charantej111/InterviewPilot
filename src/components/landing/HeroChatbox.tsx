@@ -10,6 +10,15 @@ const QUICK_PROMPTS = [
   'Data Analytics Lead · Airbnb (Search & Ranking)',
 ];
 
+const ANIMATED_PLACEHOLDERS = [
+  'Paste target role (e.g. Senior PM at Stripe) or drop resume...',
+  'Fullstack Software Engineer · Vercel (Next.js & Edge)...',
+  'Senior Product Manager · Stripe (Payments Platform)...',
+  'Staff Systems Architect · OpenAI (Distributed LLMs)...',
+  'Data Analytics Lead · Airbnb (Search & Ranking)...',
+  'Attach your resume PDF to synthesize tailored probes...',
+];
+
 export const HeroChatbox: React.FC = () => {
   const navigate = useNavigate();
   const { updateSetupDraft } = useInterview();
@@ -51,7 +60,8 @@ export const HeroChatbox: React.FC = () => {
         onFileSelect={handleFileProcess}
         attachedFile={attachedFile}
         onRemoveFile={handleRemoveFile}
-        placeholder="Paste job description, target role (e.g. Senior PM at Stripe), or attach resume..."
+        placeholder="Paste target role, job description, or attach resume..."
+        animatedPlaceholders={ANIMATED_PLACEHOLDERS}
         quickPrompts={QUICK_PROMPTS}
         onSelectPrompt={(selected) => setPromptText(selected)}
       />

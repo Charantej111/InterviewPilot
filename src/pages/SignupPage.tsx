@@ -5,31 +5,86 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { ThemeToggle } from '../components/layout/ThemeToggle';
 import GradientWaves from '../components/reactbits/GradientWaves';
-import { ArrowRight, Lock, Mail, User, Sparkles } from 'lucide-react';
-
+import { ArrowRight, ArrowLeft, Mail, User, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Logo } from '../components/ui/Logo';
+import { OtpInput } from '../components/auth/OtpInput';
 
 export const SignupPage: React.FC = () => {
-  const [name, setName] = useState('Charan Tej');
-  const [email, setEmail] = useState('charan@example.com');
-  const [password, setPassword] = useState('password123');
-  const [isLoading, setIsLoading] = useState(false);
-  const { login } = useUser();
+  const [step, setStep] = useState<'details' | 'otp'>('details');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { requestOtp, verifyOtp, resendOtp, cooldownRemaining, isRequestingOtp } = useUser();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Step 1: Send OTP to new user email
+  const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setTimeout(() => {
-      login(email, name);
-      setIsLoading(false);
-      navigate('/setup');
-    }, 500);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const cleanEmail = email.trim();
+    const cleanName = name.trim();
+
+    if (!cleanEmail) {
+      setErrorMessage('Please provide your email address.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await requestOtp(cleanEmail, cleanName);
+      if (res.error) {
+        setErrorMessage(res.error);
+      } else {
+        setStep('otp');
+        setSuccessMessage(`We sent a 6-digit code to ${cleanEmail}`);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleQuickDemo = () => {
-    login('demo@interviewpilot.ai', 'Charan Tej');
-    navigate('/setup');
+  // Step 2: Verify 6-digit OTP
+  const handleVerifyOtp = async (e?: React.FormEvent, codeToVerify?: string) => {
+    if (e) e.preventDefault();
+    setErrorMessage(null);
+
+    const targetCode = (codeToVerify || otp).trim();
+    if (targetCode.length < 6 || targetCode.length > 8) {
+      setErrorMessage('Please enter the complete verification code.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await verifyOtp(email, targetCode);
+      if (res.error) {
+        setErrorMessage(res.error);
+      } else {
+        navigate('/setup');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Resend code handler
+  const handleResend = async () => {
+    if (cooldownRemaining > 0 || isRequestingOtp) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const res = await resendOtp(email);
+    if (res.error) {
+      setErrorMessage(res.error);
+    } else {
+      setSuccessMessage('A fresh verification code has been sent to your email.');
+    }
   };
 
   return (
@@ -71,88 +126,168 @@ export const SignupPage: React.FC = () => {
       {/* Main Centered Frosted Glass Auth Card */}
       <main className="max-w-md w-full mx-auto px-4 py-4 relative z-10">
         <div className="p-7 sm:p-9 rounded-3xl bg-surface/90 dark:bg-[#11111c]/90 backdrop-blur-3xl border border-slate-200 dark:border-white/10 border-t-white/80 dark:border-t-white/25 shadow-2xl space-y-6">
-          <div className="space-y-1.5 text-center">
-            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-xs font-semibold mb-1 shadow-xs">
-              <Sparkles size={12} />
-              <span>Personalized AI Practice</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
-              Create your account
-            </h1>
-            <p className="text-xs font-semibold text-foreground-muted">
-              Start practicing tailored mock interviews in seconds
-            </p>
-          </div>
+          {step === 'details' ? (
+            /* STEP 1: ENTER NAME & EMAIL */
+            <>
+              <div className="space-y-1.5 text-center">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+                  Create your account
+                </h1>
+                <p className="text-xs font-semibold text-foreground-muted">
+                  Enter your details to receive a 6-digit one-time code
+                </p>
+              </div>
 
-          {/* Quick 1-Click Clean Demo Button */}
-          <button
-            type="button"
-            onClick={handleQuickDemo}
-            className="w-full py-2.5 px-4 rounded-xl border border-primary/25 dark:border-white/10 bg-primary/10 hover:bg-primary/15 dark:bg-white/[0.04] dark:hover:bg-white/[0.08] text-primary dark:text-purple-300 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs focus:ring-2 focus:ring-primary focus:outline-none"
-          >
-            <Sparkles size={14} />
-            <span>1-Click Instant Demo Access</span>
-          </button>
+              {errorMessage && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center">
+                  {errorMessage}
+                </div>
+              )}
 
-          <div className="flex items-center gap-3 text-xs text-foreground-subtle">
-            <div className="h-px bg-border flex-1" />
-            <span className="font-semibold text-foreground-muted text-[11px]">or continue with email</span>
-            <div className="h-px bg-border flex-1" />
-          </div>
+              <form onSubmit={handleRequestOtp} className="space-y-4">
+                <Input
+                  label="Full Name"
+                  placeholder="e.g. Alex Morgan"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  leftIcon={<User className="w-4 h-4 text-foreground-muted" />}
+                  required
+                  autoComplete="name"
+                  disabled={isSubmitting || isRequestingOtp}
+                />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Full Name"
-              placeholder="e.g. Charan Tej"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              leftIcon={<User className="w-4 h-4 text-foreground-muted" />}
-              required
-            />
+                <Input
+                  label="Email Address"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  leftIcon={<Mail className="w-4 h-4 text-foreground-muted" />}
+                  required
+                  autoComplete="email"
+                  disabled={isSubmitting || isRequestingOtp}
+                />
 
-            <Input
-              label="Email Address"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              leftIcon={<Mail className="w-4 h-4 text-foreground-muted" />}
-              required
-            />
+                <Button
+                  type="submit"
+                  size="lg"
+                  isLoading={isSubmitting || isRequestingOtp}
+                  className="w-full justify-center mt-2"
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                >
+                  Continue & Send Code
+                </Button>
+              </form>
 
-            <Input
-              label="Create Password"
-              type="password"
-              placeholder="At least 8 characters"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              leftIcon={<Lock className="w-4 h-4 text-foreground-muted" />}
-              required
-            />
+              <div className="pt-2 text-center text-xs text-foreground-muted border-t border-border">
+                <span>Already have an account? </span>
+                <Link to="/login" className="text-primary font-bold hover:underline">
+                  Sign in
+                </Link>
+              </div>
+            </>
+          ) : (
+            /* STEP 2: VERIFY 6-DIGIT OTP */
+            <>
+              <div className="space-y-2 text-center">
+                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-1">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+                  Verify your email
+                </h1>
+                <p className="text-xs text-foreground-muted leading-relaxed">
+                  We sent a 6-digit verification code to <br />
+                  <strong className="text-foreground font-semibold">{email}</strong>
+                </p>
+              </div>
 
-            <Button
-              type="submit"
-              size="lg"
-              isLoading={isLoading}
-              className="w-full justify-center mt-2"
-              rightIcon={<ArrowRight className="w-4 h-4" />}
-            >
-              Create Account & Start Practice
-            </Button>
-          </form>
+              {errorMessage && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center">
+                  {errorMessage}
+                </div>
+              )}
 
-          <div className="pt-2 text-center text-xs text-foreground-muted border-t border-border">
-            <span>Already have an account? </span>
-            <Link to="/login" className="text-primary font-bold hover:underline">
-              Sign in
-            </Link>
-          </div>
+              {successMessage && !errorMessage && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium text-center flex items-center justify-center gap-1.5">
+                  <CheckCircle2 size={14} className="shrink-0" />
+                  <span>{successMessage}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyOtp} className="space-y-6">
+                <div className="space-y-2 text-center">
+                  <label className="block text-xs font-bold text-foreground">
+                    Enter Verification Code
+                  </label>
+                  <OtpInput
+                    value={otp}
+                    onChange={(val) => {
+                      setOtp(val);
+                      if (errorMessage) setErrorMessage(null);
+                    }}
+                    onComplete={(code) => handleVerifyOtp(undefined, code)}
+                    disabled={isSubmitting}
+                    hasError={Boolean(errorMessage)}
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  isLoading={isSubmitting}
+                  disabled={otp.length < 6 || isSubmitting}
+                  className="w-full justify-center"
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                >
+                  Verify & Start Practice
+                </Button>
+              </form>
+
+              {/* Resend Cooldown and Edit Email Actions */}
+              <div className="space-y-3 pt-2 text-center text-xs border-t border-border">
+                <div className="flex items-center justify-center">
+                  {cooldownRemaining > 0 ? (
+                    <span className="text-foreground-muted font-medium">
+                      Resend code in <strong className="text-foreground font-mono">{cooldownRemaining}s</strong>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResend}
+                      disabled={isRequestingOtp}
+                      className="inline-flex items-center gap-1.5 text-primary font-bold hover:underline cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={isRequestingOtp ? 'animate-spin' : ''} />
+                      <span>Resend verification code</span>
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('details');
+                      setOtp('');
+                      setErrorMessage(null);
+                      setSuccessMessage(null);
+                    }}
+                    className="inline-flex items-center gap-1 text-foreground-muted hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft size={13} />
+                    <span>Use a different email address</span>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </main>
 
       {/* Minimal Footer */}
       <footer className="p-6 text-center text-xs text-foreground-subtle relative z-10 font-medium">
-        © {new Date().getFullYear()} InterviewPilot, Inc. Built for meaningful interview practice.
+        © {new Date().getFullYear()} InterviewPilot, Inc. Passwordless email OTP verification.
       </footer>
     </div>
   );

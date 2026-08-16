@@ -52,7 +52,7 @@ export const RecentInterviewsTable: React.FC<RecentInterviewsTableProps> = ({
               {interviews.map((item) => (
                 <tr
                   key={item.id}
-                  onClick={() => navigate('/interview/pm-acme/report')}
+                  onClick={() => navigate(`/interview/${item.id}/report`)}
                   className="hover:bg-white/[0.02] cursor-pointer transition-colors"
                 >
                   <td className="py-3 font-semibold text-white">{item.role}</td>

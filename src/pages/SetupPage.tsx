@@ -50,7 +50,7 @@ const FORMAT_OPTIONS = [
 
 export const SetupPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setupDraft, updateSetupDraft, createInterviewFromDraft } = useInterview();
+  const { setupDraft, updateSetupDraft, uploadResumeFile, createInterviewFromDraft } = useInterview();
 
   const [inputPrompt, setInputPrompt] = useState(
     setupDraft.jobDescriptionText || ''
@@ -80,14 +80,14 @@ export const SetupPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [isAnalyzing]);
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     const fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
     setAttachedFile({ name: file.name, size: fileSize });
-    updateSetupDraft({
-      resumeName: file.name,
-      resumeFileSize: fileSize,
-      resumeParsed: true,
-    });
+    try {
+      await uploadResumeFile(file);
+    } catch (err) {
+      console.error('Error uploading resume:', err);
+    }
   };
 
   const handleRemoveFile = () => {

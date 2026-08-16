@@ -10,6 +10,7 @@ export interface AnimatedAIChatProps {
   attachedFile?: { name: string; size?: string } | null;
   onRemoveFile?: () => void;
   placeholder?: string;
+  animatedPlaceholders?: string[];
   isLoading?: boolean;
   className?: string;
   quickPrompts?: string[];
@@ -23,7 +24,8 @@ export const AnimatedAIChat: React.FC<AnimatedAIChatProps> = ({
   onFileSelect,
   attachedFile,
   onRemoveFile,
-  placeholder = 'Ask zap a question...',
+  placeholder = 'Ask a question or enter target role...',
+  animatedPlaceholders,
   isLoading = false,
   className,
   quickPrompts,
@@ -33,6 +35,7 @@ export const AnimatedAIChat: React.FC<AnimatedAIChatProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
+  const [displayedPlaceholder, setDisplayedPlaceholder] = useState(placeholder);
 
   // Auto-grow textarea
   useEffect(() => {
@@ -41,6 +44,47 @@ export const AnimatedAIChat: React.FC<AnimatedAIChatProps> = ({
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 220)}px`;
     }
   }, [value]);
+
+  // Animated typewriter placeholder
+  useEffect(() => {
+    if (!animatedPlaceholders || animatedPlaceholders.length === 0 || value || isFocused) {
+      setDisplayedPlaceholder(placeholder);
+      return;
+    }
+
+    let index = 0;
+    let charIndex = 0;
+    let isDeleting = false;
+    let timer: NodeJS.Timeout;
+
+    const type = () => {
+      const fullText = animatedPlaceholders[index];
+      if (isDeleting) {
+        setDisplayedPlaceholder(fullText.substring(0, charIndex - 1));
+        charIndex--;
+        if (charIndex <= 0) {
+          isDeleting = false;
+          index = (index + 1) % animatedPlaceholders.length;
+          timer = setTimeout(type, 400);
+          return;
+        }
+        timer = setTimeout(type, 20);
+      } else {
+        setDisplayedPlaceholder(fullText.substring(0, charIndex + 1));
+        charIndex++;
+        if (charIndex >= fullText.length) {
+          isDeleting = true;
+          timer = setTimeout(type, 2400);
+          return;
+        }
+        timer = setTimeout(type, 38);
+      }
+    };
+
+    timer = setTimeout(type, 400);
+
+    return () => clearTimeout(timer);
+  }, [animatedPlaceholders, placeholder, value, isFocused]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -115,7 +159,7 @@ export const AnimatedAIChat: React.FC<AnimatedAIChatProps> = ({
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
             onKeyDown={handleKeyDown}
-            placeholder={placeholder}
+            placeholder={displayedPlaceholder}
             rows={2}
             className="w-full bg-transparent border-0 outline-none resize-none text-zinc-100 placeholder:text-zinc-500 text-sm sm:text-[14.5px] leading-relaxed max-h-[220px] overflow-y-auto"
           />

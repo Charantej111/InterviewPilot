@@ -1,15 +1,39 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import { ReadinessScoreWidget } from '../components/dashboard/ReadinessScoreWidget';
-import { RecentInterviewsTable } from '../components/dashboard/RecentInterviewsTable';
+import { RecentInterviewsTable, InterviewRecord } from '../components/dashboard/RecentInterviewsTable';
 import { Folder } from '../components/reactbits/Folder';
 import { Button } from '../components/ui/Button';
 import { ShiningText } from '../components/ui/ShiningText';
 import { Plus, Flame } from 'lucide-react';
+import { useUser } from '../context/UserContext';
+import { interviewService } from '../services/supabase/interviewService';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useUser();
+  const [recentInterviews, setRecentInterviews] = useState<InterviewRecord[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadInterviews = async () => {
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+        try {
+          const list = await interviewService.getRecentInterviews(user.id);
+          if (isMounted && list.length > 0) {
+            setRecentInterviews(list);
+          }
+        } catch (err) {
+          console.error('Error fetching dashboard interviews:', err);
+        }
+      }
+    };
+    loadInterviews();
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, user?.id]);
 
   const improvementAreas = [
     { label: 'Structure (STAR Framework)', status: 'Needs work', variant: 'warning' },
@@ -27,6 +51,12 @@ export const DashboardPage: React.FC = () => {
     { day: 'S', active: false },
   ];
 
+  const firstName = user.name ? user.name.split(' ')[0] : 'Candidate';
+  const displayScore = user.readinessPercentage > 0 ? Math.round(user.readinessPercentage * 0.1 * 10) / 10 : 7.4;
+  const displayDelta = user.readinessDelta || 8;
+  const displayStreak = user.streakDays || 1;
+  const displayCompleted = user.interviewsCompleted || 0;
+
   return (
     <DashboardLayout>
       <div className="space-y-8 max-w-5xl mx-auto">
@@ -38,9 +68,9 @@ export const DashboardPage: React.FC = () => {
                 color="#18181b"
                 size={0.9}
                 items={[
-                  <div key="1" className="p-1 text-[9px] font-bold text-slate-900">Charan.pdf</div>,
-                  <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">12 Mocks</div>,
-                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">74% Ready</div>
+                  <div key="1" className="p-1 text-[9px] font-bold text-slate-900">{firstName}.pdf</div>,
+                  <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">{displayCompleted} Mocks</div>,
+                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{user.readinessPercentage || 74}% Ready</div>
                 ]}
               />
             </div>
@@ -51,7 +81,7 @@ export const DashboardPage: React.FC = () => {
                 <ShiningText text="Live Simulation Ready" />
               </div>
               <h1 className="text-xl sm:text-2xl font-extrabold text-foreground flex items-center gap-2">
-                Good morning, Charan <span className="text-xl">👋</span>
+                Good morning, {firstName} <span className="text-xl">👋</span>
               </h1>
               <p className="text-xs sm:text-sm text-foreground-muted mt-0.5">
                 Ready for another personalized mock interview round?
@@ -72,10 +102,12 @@ export const DashboardPage: React.FC = () => {
         {/* Top Widgets Grid (2 Columns) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-4">
-            <ReadinessScoreWidget score={74} delta={8} />
+            <ReadinessScoreWidget score={displayScore} delta={displayDelta} />
           </div>
           <div className="lg:col-span-8">
-            <RecentInterviewsTable />
+            <RecentInterviewsTable
+              interviews={recentInterviews.length > 0 ? recentInterviews : undefined}
+            />
           </div>
         </div>
 
@@ -120,7 +152,7 @@ export const DashboardPage: React.FC = () => {
             </div>
 
             <div className="flex items-baseline gap-2 mb-4">
-              <span className="text-3xl font-extrabold text-foreground font-mono">12</span>
+              <span className="text-3xl font-extrabold text-foreground font-mono">{displayStreak}</span>
               <span className="text-xs text-foreground-muted font-semibold">days in a row</span>
             </div>
 
