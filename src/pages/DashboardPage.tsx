@@ -52,27 +52,24 @@ export const DashboardPage: React.FC = () => {
     navigate(`/interview/${activeInProgressSession.id}`);
   };
 
-  const improvementAreas = [
-    { label: 'Structure (STAR Framework)', status: 'Needs work', variant: 'warning' },
-    { label: 'Metric Evidence & Impact', status: 'Needs work', variant: 'warning' },
-    { label: 'Communication & Tone', status: 'Strong', variant: 'success' },
-  ];
-
-  const weekDays = [
-    { day: 'M', active: true },
-    { day: 'T', active: true },
-    { day: 'W', active: true },
-    { day: 'T', active: true },
-    { day: 'F', active: true },
-    { day: 'S', active: true },
-    { day: 'S', active: false },
-  ];
+  const hasInterviews = recentInterviews.length > 0 || (user.interviewsCompleted && user.interviewsCompleted > 0);
 
   const firstName = user.name ? user.name.split(' ')[0] : 'Candidate';
-  const displayScore = user.readinessPercentage > 0 ? Math.round(user.readinessPercentage * 0.1 * 10) / 10 : 7.4;
-  const displayDelta = user.readinessDelta || 8;
-  const displayStreak = user.streakDays || 1;
-  const displayCompleted = user.interviewsCompleted || 0;
+  const displayScore = user.readinessPercentage > 0 ? user.readinessPercentage : (recentInterviews.length > 0 ? Math.round((recentInterviews.reduce((acc, r) => acc + r.score, 0) / recentInterviews.length) * 10) : 0);
+  const displayDelta = user.readinessDelta || 0;
+  const displayStreak = user.streakDays || (recentInterviews.length > 0 ? 1 : 0);
+  const displayCompleted = user.interviewsCompleted || recentInterviews.length;
+
+  const currentDayIndex = new Date().getDay(); // 0 = Sun, 1 = Mon, ...
+  const weekDays = [
+    { day: 'M', active: currentDayIndex >= 1 && displayStreak > 0 },
+    { day: 'T', active: currentDayIndex >= 2 && displayStreak > 0 },
+    { day: 'W', active: currentDayIndex >= 3 && displayStreak > 0 },
+    { day: 'T', active: currentDayIndex >= 4 && displayStreak > 0 },
+    { day: 'F', active: currentDayIndex >= 5 && displayStreak > 0 },
+    { day: 'S', active: currentDayIndex >= 6 && displayStreak > 0 },
+    { day: 'S', active: currentDayIndex === 0 && displayStreak > 0 },
+  ];
 
   return (
     <DashboardLayout>
@@ -102,7 +99,7 @@ export const DashboardPage: React.FC = () => {
               size="md"
               onClick={handleResumeInterview}
               rightIcon={<ArrowRight size={15} />}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-md self-start sm:self-auto shrink-0"
+              className="bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-md self-start sm:self-auto shrink-0 cursor-pointer"
             >
               Resume Interview
             </Button>
@@ -117,9 +114,9 @@ export const DashboardPage: React.FC = () => {
                 color="#18181b"
                 size={0.9}
                 items={[
-                  <div key="1" className="p-1 text-[9px] font-bold text-slate-900">{firstName}.pdf</div>,
-                  <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">{displayCompleted} Mocks</div>,
-                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{user.readinessPercentage || 74}% Ready</div>
+                  <div key="1" className="p-1 text-[9px] font-bold text-slate-900">{firstName || 'Profile'}</div>,
+                  <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">{displayCompleted} Sessions</div>,
+                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{displayScore > 0 ? `${displayScore}% Ready` : 'Get Started'}</div>
                 ]}
               />
             </div>
@@ -133,7 +130,7 @@ export const DashboardPage: React.FC = () => {
                 Good morning, {firstName} <span className="text-xl">👋</span>
               </h1>
               <p className="text-xs sm:text-sm text-foreground-muted mt-0.5">
-                Ready for another personalized mock interview round?
+                Ready for your next targeted interview simulation?
               </p>
             </div>
           </div>
@@ -141,7 +138,7 @@ export const DashboardPage: React.FC = () => {
           <Button
             onClick={() => navigate('/setup')}
             size="md"
-            className="self-start sm:self-auto shadow-sm"
+            className="self-start sm:self-auto shadow-sm cursor-pointer"
             leftIcon={<Plus size={16} />}
           >
             New Interview
@@ -155,7 +152,7 @@ export const DashboardPage: React.FC = () => {
           </div>
           <div className="lg:col-span-8">
             <RecentInterviewsTable
-              interviews={recentInterviews.length > 0 ? recentInterviews : undefined}
+              interviews={recentInterviews}
             />
           </div>
         </div>
@@ -163,29 +160,34 @@ export const DashboardPage: React.FC = () => {
         {/* Bottom Widgets Grid (2 Columns) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Improvement Areas Card */}
-          <div className="lg:col-span-6 p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs text-left">
-            <h3 className="text-xs font-bold text-foreground-muted mb-4 uppercase tracking-wider">
-              Improvement focus areas
-            </h3>
+          <div className="lg:col-span-6 p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs text-left flex flex-col justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-foreground-muted mb-4 uppercase tracking-wider">
+                Improvement focus areas
+              </h3>
 
-            <div className="space-y-3">
-              {improvementAreas.map((area) => (
-                <div
-                  key={area.label}
-                  className="flex items-center justify-between py-2.5 border-b border-zinc-100 dark:border-zinc-800/80 last:border-0"
-                >
-                  <span className="text-sm font-semibold text-foreground">{area.label}</span>
-                  <span
-                    className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg ${
-                      area.variant === 'success'
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                        : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                    }`}
-                  >
-                    {area.status}
-                  </span>
+              {!hasInterviews ? (
+                <div className="py-6 text-center">
+                  <p className="text-xs text-foreground-muted">
+                    No focus areas identified yet. Complete an interview to analyze your communication, evidence attribution, and structured reasoning.
+                  </p>
                 </div>
-              ))}
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between py-2.5 border-b border-zinc-100 dark:border-zinc-800/80 last:border-0">
+                    <span className="text-sm font-semibold text-foreground">Structure & Framework Application</span>
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                      Evaluated
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-zinc-100 dark:border-zinc-800/80 last:border-0">
+                    <span className="text-sm font-semibold text-foreground">Quantitative Impact & Counter-Metrics</span>
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      Key Opportunity
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -202,7 +204,9 @@ export const DashboardPage: React.FC = () => {
 
             <div className="flex items-baseline gap-2 mb-4">
               <span className="text-3xl font-extrabold text-foreground font-mono">{displayStreak}</span>
-              <span className="text-xs text-foreground-muted font-semibold">days in a row</span>
+              <span className="text-xs text-foreground-muted font-semibold">
+                {displayStreak === 1 ? 'day in a row' : 'days in a row'}
+              </span>
             </div>
 
             {/* Weekly Activity Dot Grid */}

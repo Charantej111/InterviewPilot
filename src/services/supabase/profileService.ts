@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase';
 import { UserProfile, UserPreferences } from '../../types/user';
-import { defaultPreferences } from '../../data/mockUser';
+import { defaultPreferences } from '../../data/defaults';
 import { Database, Json } from '../../types/database.types';
 
 type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
@@ -20,14 +20,14 @@ export const profileService = {
     }
 
     if (!data) {
-      // If profile does not exist yet (e.g. legacy user), create it
+      // If profile does not exist yet, create initial empty profile
       const newProfile: ProfileInsert = {
         id: userId,
         full_name: authEmail ? authEmail.split('@')[0] : 'Candidate',
-        target_role: 'Senior Product Manager',
-        target_companies: ['Stripe', 'Acme Corp'],
+        target_role: '',
+        target_companies: [],
         experience_level: 'Mid-level',
-        streak_days: 1,
+        streak_days: 0,
         last_active_date: new Date().toISOString().split('T')[0],
         interviews_completed: 0,
         average_score: 0.0,

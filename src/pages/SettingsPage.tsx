@@ -36,7 +36,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleClearData = () => {
-    if (window.confirm('Clear all local mock session data and reset progress?')) {
+    if (window.confirm('Clear all local session data and reset progress?')) {
       localStorage.clear();
       window.location.reload();
     }
@@ -240,7 +240,7 @@ export const SettingsPage: React.FC = () => {
                 onClick={handleClearData}
                 leftIcon={<Trash2 className="w-3.5 h-3.5" />}
               >
-                Clear All Mock Data
+                Reset Local Storage
               </Button>
             </div>
           </div>
@@ -258,7 +258,7 @@ export const SettingsPage: React.FC = () => {
                 <Badge variant="success" size="sm">Active Subscription</Badge>
               </div>
               <p className="text-xs text-foreground-muted">
-                Unlimited AI mock interviews, deep resume probes, adaptive follow-ups, and exportable reports.
+                Unlimited AI simulation interviews, deep resume probes, adaptive follow-ups, and exportable reports.
               </p>
               <div className="pt-3 border-t border-border/80 flex items-center justify-between">
                 <span className="text-xs text-foreground-muted font-medium">$29.00 / month • Renews in 24 days</span>

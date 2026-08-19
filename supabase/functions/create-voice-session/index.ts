@@ -112,7 +112,7 @@ INTERVIEWER BEHAVIOR RULES:
       voiceSessionId,
       interviewId,
       provider: 'gemini_live',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.5-flash',
       systemInstruction,
       initialQuestion: currentQ ? {
         id: currentQ.id,

@@ -9,7 +9,7 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { companyName, role } = await req.json();
+    const { companyName, role, apiKey } = await req.json();
     const cleanCompany = (companyName || '').trim();
     const cleanRole = (role || '').trim();
     const researchedAt = new Date().toISOString();
@@ -55,7 +55,8 @@ Return JSON strictly matching this schema:
 
     const generated = await callGeminiStructured<any>(
       prompt,
-      'You are a corporate intelligence analyst. Prioritize verified official facts and never fabricate proprietary internal information.'
+      'You are a corporate intelligence analyst. Prioritize verified official facts and never fabricate proprietary internal information.',
+      { apiKey }
     );
 
     const companyResearch = {

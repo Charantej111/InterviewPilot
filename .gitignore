@@ -1,4 +1,4 @@
-# Logs
+# Logs & Debugging
 logs
 *.log
 npm-debug.log*
@@ -13,8 +13,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Dependency directories
 node_modules/
 jspm_packages/
+web_modules/
 
-# TypeScript cache
+# TypeScript
 *.tsbuildinfo
 
 # Build outputs
@@ -23,7 +24,9 @@ dist-ssr/
 build/
 out/
 .next/
-*.local
+.output/
+.turbo/
+.cache/
 
 # Environment variables & secrets
 .env
@@ -35,24 +38,34 @@ out/
 *.env.*
 !.env.example
 
+# Supabase
+.supabase/
+supabase/.temp/
+
 # IDE & Editor files
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
 .idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.tmp
+
+# Operating System files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Testing
+# Testing & Coverage
 coverage/
 .nyc_output/
 
-# Temporary directories
-tmp/
-temp/
-.temp/

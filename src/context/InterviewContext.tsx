@@ -18,8 +18,7 @@ import { CandidateProfile } from '../types/resume';
 import { JobProfile } from '../types/jobDescription';
 import { CompanyResearchData } from '../types/companyResearch';
 import { MatchAnalysisResult, GapPriority } from '../types/matchAnalysis';
-import { sampleActiveSession } from '../data/mockInterviews';
-import { sampleFinalReport } from '../data/mockReports';
+import { createEmptySession } from '../data/defaults';
 import { useUser } from './UserContext';
 import { interviewService } from '../services/supabase/interviewService';
 import { resumeService } from '../services/supabase/resumeService';
@@ -112,11 +111,7 @@ const defaultSetupDraft: SetupDraft = {
   difficulty: 'intermediate',
   durationMinutes: 20,
   interviewStyle: 'realistic',
-  focusAreas: [
-    'Product Sense & User Problem Breakdown',
-    'Behavioral & Leadership (STAR Framework)',
-    'Execution, Trade-offs & Sprint Delivery',
-  ],
+  focusAreas: [],
   tailoredQuestions: [],
   mode: 'text',
 };
@@ -131,7 +126,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
 
   const [activeSession, setActiveSession] = useState<InterviewSession>(() => 
-    storage.get('current_session', sampleActiveSession)
+    storage.get('current_session', createEmptySession())
   );
 
   // State Machine & Engine States
@@ -142,7 +137,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isInterrupted, setIsInterrupted] = useState<boolean>(false);
 
   const [latestFeedback, setLatestFeedback] = useState<QuestionFeedback | null>(null);
-  const [finalReport, setFinalReport] = useState<FinalReport | null>(sampleFinalReport);
+  const [finalReport, setFinalReport] = useState<FinalReport | null>(() => storage.get('final_report', null));
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [isPreparingNextQuestion, setIsPreparingNextQuestion] = useState<boolean>(false);
 
@@ -201,7 +196,12 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const fileText = await resumeService.extractTextFromFile(file);
-    const profile = await aiService.extractResumeProfile(file.name, fileText);
+    let fileBase64: string | undefined;
+    try {
+      fileBase64 = await resumeService.extractFileBase64(file);
+    } catch (_) {}
+
+    const profile = await aiService.extractResumeProfile(file.name, fileText, fileBase64);
 
     updateSetupDraft({
       resumeId: record.id,
@@ -376,11 +376,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return session;
     } else {
       const fallbackSession: InterviewSession = {
-        ...sampleActiveSession,
+        ...createEmptySession(),
         id: `sess_${Date.now()}`,
         mode,
         voiceStatus: mode === 'voice' ? 'connecting' : 'idle',
-        jobTitle: setupDraft.jobTitle || 'Product Lead',
+        jobTitle: setupDraft.jobTitle || 'Target Role',
         company: setupDraft.company || 'Target Company',
         interviewType: setupDraft.interviewType,
         difficulty: setupDraft.difficulty,

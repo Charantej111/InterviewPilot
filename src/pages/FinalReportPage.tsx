@@ -10,14 +10,14 @@ import {
   ChevronUp 
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
-import { sampleFinalReport } from '../data/mockReports';
+import { createEmptyReport } from '../data/defaults';
 import { FinalReport } from '../types/interview';
 
 export const FinalReportPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { finalReport, getReport, activeSession } = useInterview();
-  const [report, setReport] = useState<FinalReport>(finalReport || sampleFinalReport);
+  const [report, setReport] = useState<FinalReport>(finalReport || createEmptyReport());
   const [isExporting, setIsExporting] = useState(false);
   const [expandedQuestionIdx, setExpandedQuestionIdx] = useState<number | null>(null);
 
@@ -25,7 +25,9 @@ export const FinalReportPage: React.FC = () => {
     const fetchReport = async () => {
       try {
         const rep = await getReport(id);
-        if (rep) setReport(rep);
+        if (rep) {
+          setReport(rep);
+        }
       } catch (err) {
         console.error('Error fetching final report:', err);
       }

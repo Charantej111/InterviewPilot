@@ -61,6 +61,23 @@ export const resumeService = {
   },
 
   /**
+   * Converts file to Base64 data URL / raw base64 string for direct multimodal Gemini parsing.
+   */
+  async extractFileBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix (e.g. "data:application/pdf;base64,")
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  },
+
+  /**
    * Extracts readable text content from an uploaded resume file.
    */
   async extractTextFromFile(file: File): Promise<string> {
@@ -72,14 +89,26 @@ export const resumeService = {
       const uint8 = new Uint8Array(buffer);
       const textDecoder = new TextDecoder('utf-8', { fatal: false });
       const rawString = textDecoder.decode(uint8);
+      
+      // Extract text content from PDF text streams if present
+      const pdfTextMatches = rawString.match(/\(([^()]+)\)\s*T[jJ]/g);
+      if (pdfTextMatches && pdfTextMatches.length > 5) {
+        const extracted = pdfTextMatches
+          .map((m) => m.replace(/^\(/, '').replace(/\)\s*T[jJ]$/, ''))
+          .join(' ');
+        if (extracted.length > 50) {
+          return extracted;
+        }
+      }
+
       const cleanChars = rawString.replace(/[^\x20-\x7E\t\n\r]/g, ' ');
-      const words = cleanChars.split(/\s+/).filter((w) => w.length > 1);
-      if (words.length > 20) {
+      const words = cleanChars.split(/\s+/).filter((w) => w.length > 1 && !w.startsWith('/') && !w.includes('obj') && !w.includes('endobj'));
+      if (words.length > 15) {
         return words.join(' ');
       }
       return '';
     } catch (err) {
-      console.warn('Could not extract raw text from file, using filename fallback:', err);
+      console.warn('Could not extract raw text from file, using fallback extraction:', err);
       return '';
     }
   },

@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { callGeminiStructured } from '../_shared/gemini.ts';
-import { calculateOverallScore, RubricDimensions } from '../_shared/scoring.ts';
+import { ANSWER_EVALUATOR_POLICY } from '../_shared/aiPolicy.ts';
+import { applyDeterministicConstraints, RawEvaluationProposal } from '../_shared/scoring.ts';
 
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -16,56 +17,79 @@ serve(async (req: Request) => {
       company, 
       difficulty,
       remainingMinutes,
+      candidateProfile,
       apiKey
     } = await req.json();
 
     const cleanAnswer = (answerText || '').trim();
 
     const prompt = `
-Evaluate the candidate's submitted answer for the following interview question.
+=== TASK: CANDIDATE ANSWER MULTI-PHASE EVALUATION ===
 
-Question Metadata:
-- Category: ${question?.category || 'General'}
+QUESTION CONTEXT:
+- Question ID: "${question?.id || 'q_1'}"
+- Category / Type: "${question?.questionType || question?.category || 'General'}"
 - Question Text: "${question?.text || ''}"
-- Question Intent: "${question?.intent || ''}"
-- Expected Positive Signals: ${JSON.stringify(question?.expectedSignals || [])}
-- Negative Red Flags: ${JSON.stringify(question?.redFlags || [])}
-- Core Evaluation Criteria: ${JSON.stringify(question?.evaluationCriteria || {})}
-- Target Role: "${role || 'Target Role'}"
+- Intent: "${question?.intent || ''}"
+- Expected Characteristics: ${JSON.stringify(question?.expectedAnswerCharacteristics || question?.expectedSignals || [])}
+- Target Role & Level: "${role || 'Target Role'}" (${difficulty || 'intermediate'})
 - Target Company: "${company || 'Target Company'}"
-- Difficulty Calibrated: "${difficulty || 'intermediate'}"
 
-Candidate Answer:
+CANDIDATE SUBMITTED ANSWER:
 "${cleanAnswer || 'No response provided.'}"
 
-CRITICAL INSTRUCTIONS:
-1. Score each of the 6 dimensions on a strict 1.0 to 10.0 scale based on demonstrated evidence:
-   - relevance: How directly and completely the candidate addressed the specific prompt. (Weight: 25%)
-   - structure: Logical flow, organized narrative (e.g. STAR framework), prioritization. (Weight: 20%)
-   - clarity: Articulation, conciseness, absence of rambling or vague buzzwords. (Weight: 15%)
-   - depth: First-principles understanding, edge cases, technical/business mechanics. (Weight: 15%)
-   - evidence: Concrete metrics, baseline comparison, quantified outcomes, personal ownership. (Weight: 15%)
-   - roleAlignment: Fit for ${role} level expectations and ${company} operating scale. (Weight: 10%)
-2. DO NOT calculate the overall score in this JSON. The overall score will be computed deterministically server-side.
-3. Identify 2-3 concrete "whatWorked" strengths evidenced in the response.
-4. Identify 1-2 concrete "whatHeldYouBack" missed signals or growth opportunities.
-5. In "tryThisNextTime", provide structured coaching:
-   - framework: (e.g. "STAR Framework with Baseline Metrics", "First-Principles Decomposition")
-   - suggestion: (Actionable advice on what to structure or include)
-   - promptToImprove: (A self-reflective prompt for the candidate to practice)
-   - examplePhrasing: (An illustrative phrasing template demonstrating structure WITHOUT writing their specific answer for them)
-6. Check if an adaptive follow-up probe is needed based on missing metrics, vague ownership, or unaddressed edge cases. (Only recommend follow-up if remaining time allows: ${remainingMinutes ?? 15} minutes left).
+CANDIDATE KNOWN RESUME CONTEXT:
+Summary: "${candidateProfile?.summary || 'Standard profile'}"
+Verified Skills: ${JSON.stringify(candidateProfile?.skills || [])}
 
-Return JSON strictly matching this schema:
+EVALUATION INSTRUCTIONS:
+1. STEP 1: CLASSIFY ANSWER
+   - Choose exactly one: 'strong' | 'adequate' | 'weak' | 'irrelevant' | 'not_answered' | 'evasive' | 'unprofessional' | 'unsupported_claim'
+2. STEP 2: RELEVANCE GATE
+   - Evaluate if the response directly addresses the question ('answered' | 'partially_answered' | 'not_answered').
+   - Score relevance 0 - 10. If not_answered or completely off-topic (e.g. talking about sports/cricket when asked about product trade-offs), set status 'not_answered' and score 0.
+3. STEP 3: PROFESSIONALISM
+   - Evaluate tone ('acceptable' | 'concerning' | 'poor').
+4. STEP 4: COMPLETENESS MAP
+   - Map observed characteristics from the candidate's response against the question's expectedAnswerCharacteristics.
+5. STEP 5: PROPOSE 4-FIELD SCORES FOR 6 DIMENSIONS (1.0 to 10.0 scale)
+   - relevance, structure, clarity, depth, evidence, roleAlignment.
+   - For each dimension provide: { "score": number, "reason": string, "evidence": string, "missing": string }.
+6. STEP 6: VERIFY CLAIMS
+   - If candidate makes major unlisted claims, tag support status as 'unverified_by_submitted_resume'.
+7. STEP 7: COACHING DIRECTIVES
+   - What worked (0 items if irrelevant/not answered; 1-3 items only if evidenced).
+   - What held you back.
+   - Try this next time with framework, suggestion, and practice prompt.
+8. STEP 8: ADAPTIVE PROBE RECOMMENDATION
+   - Determine if follow-up probe is needed ('missing_evidence' | 'missing_metric' | 'unclear_decision' | 'missing_tradeoff' | 'shallow_reasoning' | 'unsupported_claim' | 'partial_answer' | 'technical_gap').
+
+Return strict JSON matching this structure:
 {
-  "dimensions": {
-    "relevance": number,
-    "structure": number,
-    "clarity": number,
-    "depth": number,
-    "evidence": number,
-    "roleAlignment": number
+  "answerClassification": "strong" | "adequate" | "weak" | "irrelevant" | "not_answered" | "evasive" | "unprofessional" | "unsupported_claim",
+  "relevanceGate": {
+    "status": "answered" | "partially_answered" | "not_answered",
+    "score": number,
+    "reason": string
   },
+  "professionalism": {
+    "status": "acceptable" | "concerning" | "poor",
+    "note": string
+  },
+  "completenessMap": {
+    "observedCharacteristics": string[]
+  },
+  "dimensionDetails": {
+    "relevance": { "score": number, "reason": string, "evidence": string, "missing": string },
+    "structure": { "score": number, "reason": string, "evidence": string, "missing": string },
+    "clarity": { "score": number, "reason": string, "evidence": string, "missing": string },
+    "depth": { "score": number, "reason": string, "evidence": string, "missing": string },
+    "evidence": { "score": number, "reason": string, "evidence": string, "missing": string },
+    "roleAlignment": { "score": number, "reason": string, "evidence": string, "missing": string }
+  },
+  "unverifiedClaims": [
+    { "claim": string, "resumeSupport": "supported" | "unverified_by_submitted_resume" | "contradicted", "note": string }
+  ],
   "whatWorked": string[],
   "whatHeldYouBack": string[],
   "tryThisNextTime": {
@@ -74,51 +98,41 @@ Return JSON strictly matching this schema:
     "promptToImprove": string,
     "examplePhrasing": string
   },
-  "followUpNeeded": boolean,
-  "followUpTriggerReason": string | null,
-  "followUpTopic": string | null
+  "shouldFollowUp": boolean,
+  "followUpReasonCode": string | null
 }
 `;
 
-    const rawEvaluation = await callGeminiStructured<{
-      dimensions: RubricDimensions;
-      whatWorked: string[];
-      whatHeldYouBack: string[];
-      tryThisNextTime: {
-        framework: string;
-        suggestion: string;
-        promptToImprove: string;
-        examplePhrasing: string;
-      };
-      followUpNeeded: boolean;
-      followUpTriggerReason: string | null;
-      followUpTopic: string | null;
-    }>(
+    const rawProposal = await callGeminiStructured<RawEvaluationProposal>(
       prompt,
-      'You are a rigorous, calibrated bar raiser and hiring committee member. Evaluate responses objectively against the 6-dimension rubric.',
+      ANSWER_EVALUATOR_POLICY,
       { apiKey }
     );
 
-    // Deterministic overall score calculation (LLM does NOT calculate overall score)
-    const overallScore = calculateOverallScore(rawEvaluation.dimensions);
+    // Apply Server-side Deterministic Rule and Dimension Ceiling Engine
+    const finalEvaluation = applyDeterministicConstraints(
+      rawProposal,
+      question,
+      cleanAnswer
+    );
 
     const feedback = {
-      questionId: question?.id || 'q_unknown',
-      overallScore,
-      breakdown: {
-        relevance: rawEvaluation.dimensions.relevance,
-        structure: rawEvaluation.dimensions.structure,
-        clarity: rawEvaluation.dimensions.clarity,
-        depth: rawEvaluation.dimensions.depth,
-        evidence: rawEvaluation.dimensions.evidence,
-        roleAlignment: rawEvaluation.dimensions.roleAlignment,
-      },
-      whatWorked: rawEvaluation.whatWorked || [],
-      whatHeldYouBack: rawEvaluation.whatHeldYouBack || [],
-      tryThisNextTime: rawEvaluation.tryThisNextTime,
-      followUpNeeded: rawEvaluation.followUpNeeded && (remainingMinutes === undefined || remainingMinutes > 3),
-      followUpTriggerReason: rawEvaluation.followUpTriggerReason,
-      followUpTopic: rawEvaluation.followUpTopic,
+      questionId: question?.id || 'q_1',
+      overallScore: finalEvaluation.overallScore,
+      scoreInterval: finalEvaluation.scoreInterval,
+      answerClassification: finalEvaluation.answerClassification,
+      relevanceGate: finalEvaluation.relevanceGate,
+      professionalism: finalEvaluation.professionalism,
+      completenessMap: finalEvaluation.completenessMap,
+      breakdown: finalEvaluation.breakdown,
+      dimensionDetails: finalEvaluation.dimensionDetails,
+      unverifiedClaims: finalEvaluation.unverifiedClaims,
+      whatWorked: finalEvaluation.whatWorked,
+      whatHeldYouBack: finalEvaluation.whatHeldYouBack,
+      tryThisNextTime: finalEvaluation.tryThisNextTime,
+      deterministicConstraintsApplied: finalEvaluation.deterministicConstraintsApplied,
+      followUpNeeded: finalEvaluation.shouldFollowUp && (remainingMinutes === undefined || remainingMinutes > 3),
+      followUpTriggerReason: finalEvaluation.followUpReasonCode,
     };
 
     return new Response(JSON.stringify({ feedback }), {

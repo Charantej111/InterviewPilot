@@ -38,6 +38,9 @@ export const evaluationService = {
       feedback = {
         questionId: params.question.id,
         overallScore,
+        answerClassification: 'adequate',
+        relevanceGate: { status: 'answered', score: params.dimensions.relevance, reason: 'Directly addressed prompt.' },
+        professionalism: { status: 'acceptable' },
         breakdown: {
           relevance: params.dimensions.relevance,
           structure: params.dimensions.structure,
@@ -124,6 +127,11 @@ export const evaluationService = {
         id: q.id,
         order: q.sequence_order,
         type: (q.question_type as Question['type']) || 'initial',
+        questionType: (q.question_type as any) || 'product_sense',
+        source: 'job_description' as const,
+        sourceReference: 'Core Responsibilities',
+        targetCompetency: q.category || 'Problem Solving',
+        expectedAnswerCharacteristics: q.expected_signals || ['States clear problem context and initial assumptions', 'Explains decision criteria'],
         parentQuestionId: q.parent_question_id || null,
         category: q.category,
         text: q.question_text,

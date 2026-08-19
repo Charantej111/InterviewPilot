@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { UserProfile, UserPreferences } from '../types/user';
-import { mockUser, defaultPreferences } from '../data/mockUser';
+import { createDefaultUser, defaultPreferences } from '../data/defaults';
 import { supabase } from '../lib/supabase';
 import { profileService } from '../services/supabase/profileService';
 import { storage } from '../lib/storage';
@@ -24,7 +24,7 @@ interface UserContextType {
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile>(() => storage.get('user_profile', mockUser));
+  const [user, setUser] = useState<UserProfile>(() => storage.get('user_profile', createDefaultUser()));
   const [preferences, setPreferences] = useState<UserPreferences>(() => 
     storage.get('user_preferences', defaultPreferences)
   );
@@ -106,9 +106,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await fetchUserProfile(session.user.id, session.user.email);
       } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
-        setUser(mockUser);
+        const emptyUser = createDefaultUser();
+        setUser(emptyUser);
         storage.set('is_authenticated', false);
-        storage.set('user_profile', mockUser);
+        storage.set('user_profile', emptyUser);
       }
       setIsLoadingAuth(false);
     });
@@ -250,9 +251,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Logout error:', err);
     } finally {
       setIsAuthenticated(false);
-      setUser(mockUser);
+      const emptyUser = createDefaultUser();
+      setUser(emptyUser);
       storage.set('is_authenticated', false);
-      storage.set('user_profile', mockUser);
+      storage.set('user_profile', emptyUser);
     }
   };
 

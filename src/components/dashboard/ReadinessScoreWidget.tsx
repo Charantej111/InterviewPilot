@@ -6,9 +6,11 @@ export interface ReadinessScoreWidgetProps {
 }
 
 export const ReadinessScoreWidget: React.FC<ReadinessScoreWidgetProps> = ({
-  score = 74,
-  delta = 8,
+  score = 0,
+  delta = 0,
 }) => {
+  const isZero = score === 0;
+
   return (
     <div className="glow-card p-6 sm:p-7 flex flex-col justify-between h-full">
       <div>
@@ -37,7 +39,7 @@ export const ReadinessScoreWidget: React.FC<ReadinessScoreWidgetProps> = ({
                 stroke="url(#readinessGrad)"
                 strokeWidth="8"
                 strokeDasharray={`${2 * Math.PI * 40}`}
-                strokeDashoffset={`${2 * Math.PI * 40 * (1 - score / 100)}`}
+                strokeDashoffset={`${2 * Math.PI * 40 * (1 - (isZero ? 0 : score) / 100)}`}
                 strokeLinecap="round"
                 fill="transparent"
               />
@@ -52,7 +54,7 @@ export const ReadinessScoreWidget: React.FC<ReadinessScoreWidgetProps> = ({
             {/* Centered Score */}
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
               <span className="text-3xl font-extrabold text-white font-mono tracking-tight">
-                {score}%
+                {isZero ? '--%' : `${score}%`}
               </span>
             </div>
           </div>
@@ -60,9 +62,15 @@ export const ReadinessScoreWidget: React.FC<ReadinessScoreWidgetProps> = ({
       </div>
 
       <div className="text-center pt-2">
-        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-          +{delta}% from last week
-        </span>
+        {isZero ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground-muted bg-white/[0.04] px-2.5 py-1 rounded-full border border-white/10">
+            Complete an interview to calculate
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+            {delta >= 0 ? `+${delta}%` : `${delta}%`} from last week
+          </span>
+        )}
       </div>
     </div>
   );

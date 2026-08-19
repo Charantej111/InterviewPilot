@@ -4,6 +4,42 @@ export type InterviewDuration = 10 | 15 | 20 | 30 | 45;
 export type InterviewStyle = 'friendly' | 'realistic' | 'challenging';
 export type InterviewMode = 'text' | 'voice';
 
+export type QuestionType = 
+  | 'behavioral' 
+  | 'product_sense' 
+  | 'execution' 
+  | 'analytical' 
+  | 'technical' 
+  | 'system_design' 
+  | 'case' 
+  | 'resume_deep_dive' 
+  | 'company_specific' 
+  | 'clarification';
+
+export type QuestionSource = 
+  | 'resume' 
+  | 'job_description' 
+  | 'company_context' 
+  | 'gap_analysis' 
+  | 'competency' 
+  | 'follow_up';
+
+export type AnswerabilityStatus = 
+  | 'grounded_answerable' 
+  | 'grounded_gap_probe' 
+  | 'general_competency' 
+  | 'unsupported_question';
+
+export type AnswerClassification = 
+  | 'strong' 
+  | 'adequate' 
+  | 'weak' 
+  | 'irrelevant' 
+  | 'not_answered' 
+  | 'evasive' 
+  | 'unprofessional' 
+  | 'unsupported_claim';
+
 export type VoiceStatus = 
   | 'idle' 
   | 'connecting' 
@@ -11,7 +47,7 @@ export type VoiceStatus =
   | 'speaking' 
   | 'listening' 
   | 'processing' 
-  | 'interrupted'
+  | 'interrupted' 
   | 'reconnecting' 
   | 'disconnected' 
   | 'error';
@@ -42,6 +78,7 @@ export interface InterviewConversationState {
   recentTurns: ConversationTurn[];
   followUpsUsed: number;
   remainingTime: number;
+  testedCompetencies?: Record<string, number>; // competency -> verification score
 }
 
 export interface QuestionEvaluationCriteria {
@@ -60,10 +97,16 @@ export interface Question {
   id: string;
   order: number;
   type: 'initial' | 'follow_up';
+  questionType: QuestionType;
+  source: QuestionSource;
+  sourceReference: string;
+  targetCompetency: string;
+  jdRequirement?: string;
+  intent: string;
+  expectedAnswerCharacteristics: string[];
   parentQuestionId?: string | null;
   category: string;
   text: string;
-  intent?: string;
   contextExplanation?: string;
   recommendedDurationSeconds?: number;
   expectedSignals?: string[];
@@ -71,6 +114,7 @@ export interface Question {
   evaluationCriteria?: QuestionEvaluationCriteria;
   adaptiveFollowUpTriggers?: AdaptiveFollowUpTrigger[];
   expectedKeyPoints?: string[];
+  answerabilityStatus?: AnswerabilityStatus;
 }
 
 export interface CandidateAnswer {
@@ -80,6 +124,7 @@ export interface CandidateAnswer {
   inputMode: 'text' | 'voice';
   submittedAt: string;
   transcript?: string;
+  transcriptConfidence?: 'high' | 'medium' | 'low';
 }
 
 export interface CoachingSuggestion {
@@ -89,9 +134,45 @@ export interface CoachingSuggestion {
   examplePhrasing?: string;
 }
 
+export interface DimensionScoreDetail {
+  score: number;
+  reason: string;
+  evidence: string;
+  missing: string;
+}
+
+export interface RelevanceGateResult {
+  status: 'answered' | 'partially_answered' | 'not_answered';
+  score: number; // 0 - 10
+  reason: string;
+}
+
+export interface ProfessionalismResult {
+  status: 'acceptable' | 'concerning' | 'poor';
+  note?: string;
+}
+
+export interface CompletenessMapResult {
+  requiredCharacteristics: string[];
+  observedCharacteristics: string[];
+  missingCharacteristics: string[];
+  coverageRatio: number; // 0.0 to 1.0
+}
+
+export interface UnverifiedClaimResult {
+  claim: string;
+  resumeSupport: 'supported' | 'unverified_by_submitted_resume' | 'contradicted';
+  note: string;
+}
+
 export interface QuestionFeedback {
   questionId: string;
   overallScore: number; // 0 - 10 calculated deterministically
+  scoreInterval?: [number, number];
+  answerClassification: AnswerClassification;
+  relevanceGate: RelevanceGateResult;
+  professionalism: ProfessionalismResult;
+  completenessMap?: CompletenessMapResult;
   breakdown: {
     relevance: number;
     structure: number;
@@ -100,9 +181,21 @@ export interface QuestionFeedback {
     evidence: number;
     roleAlignment: number;
   };
+  dimensionDetails?: {
+    relevance: DimensionScoreDetail;
+    structure: DimensionScoreDetail;
+    clarity: DimensionScoreDetail;
+    depth: DimensionScoreDetail;
+    evidence: DimensionScoreDetail;
+    roleAlignment: DimensionScoreDetail;
+  };
+  unverifiedClaims?: UnverifiedClaimResult[];
   whatWorked: string[];
   whatHeldYouBack: string[];
   tryThisNextTime: CoachingSuggestion;
+  deterministicConstraintsApplied?: string[];
+  shouldFollowUp?: boolean;
+  followUpReasonCode?: 'missing_evidence' | 'missing_metric' | 'unclear_decision' | 'missing_tradeoff' | 'shallow_reasoning' | 'unsupported_claim' | 'partial_answer' | 'technical_gap';
 }
 
 export interface InterviewSession {
@@ -142,6 +235,16 @@ export interface InterviewSession {
   finalReportId?: string;
 }
 
+export interface DeliveryObservation {
+  speakingPaceWPM?: number;
+  paceRating: 'optimal' | 'too_fast' | 'too_slow';
+  longPauseCount: number;
+  fillerWordCount: number;
+  frequentFillerWords: string[];
+  clarityRating: 'clear' | 'moderate' | 'muffled';
+  deliveryScore: number; // 0 - 10 separate coaching metric
+}
+
 export interface FinalReport {
   id: string;
   sessionId: string;
@@ -150,7 +253,10 @@ export interface FinalReport {
   company: string;
   overallScore: number; // 0 - 10
   readinessPercentage: number;
+  scoreInterval?: [number, number];
+  qualificationConfidence?: 'high' | 'medium' | 'low';
   summary: string;
+  deliveryObservations?: DeliveryObservation;
   dimensions: {
     name: string;
     score: number;
@@ -159,6 +265,7 @@ export interface FinalReport {
   }[];
   topStrengths: string[];
   priorityImprovements: string[];
+  criticalGaps?: string[];
   recommendedPractice: {
     title: string;
     description: string;
@@ -171,5 +278,6 @@ export interface FinalReport {
     score: number;
     userAnswer: string;
     keyCritique: string;
+    answerClassification?: AnswerClassification;
   }[];
 }

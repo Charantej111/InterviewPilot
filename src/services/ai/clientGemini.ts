@@ -1,4 +1,4 @@
-export interface GeminiCallConfig {
+export interface ClientGeminiConfig {
   model?: string;
   temperature?: number;
   maxOutputTokens?: number;
@@ -6,7 +6,7 @@ export interface GeminiCallConfig {
   apiKey?: string;
   inlineData?: {
     mimeType: string;
-    data: string; // base64
+    data: string; // base64 string
   };
 }
 
@@ -18,9 +18,6 @@ export const CANDIDATE_GEMINI_MODELS = [
   'gemini-flash-latest',
 ];
 
-/**
- * Strips markdown code fences from JSON output if present.
- */
 export function cleanJsonText(raw: string): string {
   let cleaned = raw.trim();
   if (cleaned.startsWith('```json')) {
@@ -32,7 +29,7 @@ export function cleanJsonText(raw: string): string {
     cleaned = cleaned.slice(0, -3);
   }
   cleaned = cleaned.trim();
-  
+
   // Extract JSON slice between first { or [ and last } or ]
   const firstBrace = cleaned.indexOf('{');
   const firstBracket = cleaned.indexOf('[');
@@ -56,17 +53,26 @@ export function cleanJsonText(raw: string): string {
   return cleaned.trim();
 }
 
+const getEffectiveApiKey = (customKey?: string): string => {
+  return (
+    customKey ||
+    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+    (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY ||
+    ''
+  );
+};
+
 /**
- * Calls Gemini with structured JSON output enforcement, multi-model cascade, and automatic retries.
+ * Calls Gemini directly from the client with structured JSON output enforcement and multi-model cascade.
  */
-export async function callGeminiStructured<T>(
+export async function callClientGeminiStructured<T>(
   prompt: string,
   systemInstruction?: string,
-  config?: GeminiCallConfig
+  config?: ClientGeminiConfig
 ): Promise<T> {
-  const apiKey = config?.apiKey || Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_AI_API_KEY');
+  const apiKey = getEffectiveApiKey(config?.apiKey);
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your Supabase project secrets or .env.');
+    throw new Error('VITE_GEMINI_API_KEY is not configured in client environment.');
   }
 
   const candidateModels = config?.model
@@ -74,7 +80,7 @@ export async function callGeminiStructured<T>(
     : CANDIDATE_GEMINI_MODELS;
 
   const temperature = config?.temperature ?? 0.2;
-  const maxRetriesPerModel = config?.retries ?? 1;
+  const maxRetries = config?.retries ?? 1;
   let lastError: Error | null = null;
 
   const parts: any[] = [];
@@ -91,7 +97,7 @@ export async function callGeminiStructured<T>(
   for (const model of candidateModels) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -112,11 +118,11 @@ export async function callGeminiStructured<T>(
         if (!response.ok) {
           const errText = await response.text();
           const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
-          
+
           if (isOverloadedOrNotFound) {
-            console.warn(`Gemini model ${model} returned status ${response.status}. Cascading to next candidate model...`);
+            console.warn(`[Client Gemini] Model ${model} returned ${response.status}. Cascading to next candidate model...`);
             lastError = new Error(`Gemini API error (${response.status}): ${errText}`);
-            break; // Break inner loop to try next model in candidateModels
+            break; // Break inner retry loop to immediately try next model in cascade
           }
 
           throw new Error(`Gemini API error (${response.status}): ${errText}`);
@@ -132,27 +138,27 @@ export async function callGeminiStructured<T>(
         return JSON.parse(cleaned) as T;
       } catch (err: any) {
         lastError = err;
-        if (attempt < maxRetriesPerModel) {
-          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 400));
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 350));
         }
       }
     }
   }
 
-  throw lastError || new Error('Failed to obtain valid JSON from Gemini across all candidate models.');
+  throw lastError || new Error('Failed to obtain structured JSON from Gemini across all candidate models.');
 }
 
 /**
- * Calls Gemini for free-form conversational text output with multi-model cascade.
+ * Calls Gemini directly from the client for conversational text with multi-model cascade.
  */
-export async function callGeminiText(
+export async function callClientGeminiText(
   prompt: string,
   systemInstruction?: string,
-  config?: GeminiCallConfig
+  config?: ClientGeminiConfig
 ): Promise<string> {
-  const apiKey = config?.apiKey || Deno.env.get('GEMINI_API_KEY') || Deno.env.get('GOOGLE_AI_API_KEY');
+  const apiKey = getEffectiveApiKey(config?.apiKey);
   if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set GEMINI_API_KEY in your Supabase project secrets or .env.');
+    throw new Error('VITE_GEMINI_API_KEY is not configured in client environment.');
   }
 
   const candidateModels = config?.model
@@ -160,7 +166,7 @@ export async function callGeminiText(
     : CANDIDATE_GEMINI_MODELS;
 
   const temperature = config?.temperature ?? 0.7;
-  const maxRetriesPerModel = config?.retries ?? 1;
+  const maxRetries = config?.retries ?? 1;
   let lastError: Error | null = null;
 
   const parts: any[] = [];
@@ -177,7 +183,7 @@ export async function callGeminiText(
   for (const model of candidateModels) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -197,11 +203,11 @@ export async function callGeminiText(
         if (!response.ok) {
           const errText = await response.text();
           const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
-          
+
           if (isOverloadedOrNotFound) {
-            console.warn(`Gemini text model ${model} returned status ${response.status}. Cascading to next candidate model...`);
+            console.warn(`[Client Gemini Text] Model ${model} returned ${response.status}. Cascading to next candidate model...`);
             lastError = new Error(`Gemini API text error (${response.status}): ${errText}`);
-            break; // Break inner loop to try next model in candidateModels
+            break;
           }
 
           throw new Error(`Gemini API text error (${response.status}): ${errText}`);
@@ -216,8 +222,8 @@ export async function callGeminiText(
         return textOutput.trim();
       } catch (err: any) {
         lastError = err;
-        if (attempt < maxRetriesPerModel) {
-          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 400));
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 350));
         }
       }
     }
