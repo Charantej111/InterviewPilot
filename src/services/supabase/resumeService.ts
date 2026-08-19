@@ -61,6 +61,30 @@ export const resumeService = {
   },
 
   /**
+   * Extracts readable text content from an uploaded resume file.
+   */
+  async extractTextFromFile(file: File): Promise<string> {
+    try {
+      if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+        return await file.text();
+      }
+      const buffer = await file.arrayBuffer();
+      const uint8 = new Uint8Array(buffer);
+      const textDecoder = new TextDecoder('utf-8', { fatal: false });
+      const rawString = textDecoder.decode(uint8);
+      const cleanChars = rawString.replace(/[^\x20-\x7E\t\n\r]/g, ' ');
+      const words = cleanChars.split(/\s+/).filter((w) => w.length > 1);
+      if (words.length > 20) {
+        return words.join(' ');
+      }
+      return '';
+    } catch (err) {
+      console.warn('Could not extract raw text from file, using filename fallback:', err);
+      return '';
+    }
+  },
+
+  /**
    * Uploads a resume to the private 'resumes' Supabase Storage bucket
    * and creates a record in the public.resumes database table.
    */

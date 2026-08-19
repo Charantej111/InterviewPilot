@@ -8,11 +8,14 @@ import { Folder } from '../components/reactbits/Folder';
 import { 
   Building2, 
   Sparkles, 
-  ArrowRight
+  ArrowRight,
+  Mic,
+  Keyboard
 } from 'lucide-react';
+import { InterviewMode } from '../types/interview';
 
 export const InterviewPreviewPage: React.FC = () => {
-  const { activeSession } = useInterview();
+  const { activeSession, startVoiceSession, switchToTextMode } = useInterview();
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -21,12 +24,18 @@ export const InterviewPreviewPage: React.FC = () => {
     }
   }, [activeSession.status, navigate]);
 
-  const handleStart = () => {
+  const handleStart = (mode: InterviewMode) => {
     if (activeSession.status === 'failed') {
       navigate('/dashboard');
       return;
     }
-    navigate(`/interview/${activeSession.id}`);
+    if (mode === 'voice') {
+      navigate(`/interview/${activeSession.id}`);
+      setTimeout(() => startVoiceSession(), 400);
+    } else {
+      switchToTextMode();
+      navigate(`/interview/${activeSession.id}`);
+    }
   };
 
   return (
@@ -95,8 +104,8 @@ export const InterviewPreviewPage: React.FC = () => {
               <span className="font-semibold text-foreground font-mono">~{activeSession.durationMinutes} mins</span>
             </div>
             <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
-              <span className="text-foreground-muted block">Input Mode</span>
-              <span className="font-semibold text-foreground">Voice & Text</span>
+              <span className="text-foreground-muted block">Real-Time Voice</span>
+              <span className="font-semibold text-foreground">Gemini Live</span>
             </div>
             <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
               <span className="text-foreground-muted block">Follow-ups</span>
@@ -136,27 +145,40 @@ export const InterviewPreviewPage: React.FC = () => {
               <div>• Take 10 seconds to collect your thoughts before speaking.</div>
               <div>• Use the STAR framework for behavioral responses.</div>
               <div>• State your baseline numbers before experiment metrics.</div>
-              <div>• Always include a guardrail counter-metric.</div>
+              <div>• You can interrupt the AI at any time during Voice Mode.</div>
             </div>
           </div>
         </div>
 
-        {/* Start CTA */}
-        <div className="flex items-center justify-between pt-2">
+        {/* Start CTA Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <Button variant="secondary" onClick={() => navigate('/setup')}>
             Back to Setup
           </Button>
 
-          <Button
-            size="lg"
-            onClick={handleStart}
-            rightIcon={<ArrowRight className="w-4 h-4" />}
-            className="px-8 shadow-md"
-          >
-            Start interview
-          </Button>
+          <div className="flex items-center gap-3 ml-auto">
+            <Button
+              variant="secondary"
+              onClick={() => handleStart('text')}
+              leftIcon={<Keyboard className="w-4 h-4" />}
+            >
+              Start Text Interview
+            </Button>
+
+            <Button
+              size="lg"
+              onClick={() => handleStart('voice')}
+              leftIcon={<Mic className="w-4 h-4" />}
+              rightIcon={<ArrowRight className="w-4 h-4" />}
+              className="px-6 shadow-md"
+            >
+              Start Voice Interview
+            </Button>
+          </div>
         </div>
       </div>
     </DashboardLayout>
   );
 };
+
+export default InterviewPreviewPage;

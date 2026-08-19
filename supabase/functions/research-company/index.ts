@@ -3,7 +3,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { getSearchProvider } from '../_shared/search.ts';
 import { callGeminiStructured } from '../_shared/gemini.ts';
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -14,7 +14,7 @@ serve(async (req) => {
     const cleanRole = (role || '').trim();
     const researchedAt = new Date().toISOString();
 
-    // 1. Perform authoritative web search via SearchProvider
+    // 1. Authoritative web search via SearchProvider (happens in preparation phase)
     const searchProvider = getSearchProvider();
     const searchQuery = `${cleanCompany} company business model products engineering culture "${cleanRole}"`;
     const searchResult = await searchProvider.search(searchQuery, {
@@ -24,7 +24,8 @@ serve(async (req) => {
 
     // 2. Synthesize search sources with Gemini
     const prompt = `
-Analyze the following search results for ${cleanCompany} relevant to the ${cleanRole} role.
+Analyze the following search results for "${cleanCompany}" relevant to the "${cleanRole}" role.
+
 Search Sources Content:
 ${searchResult.rawText}
 
@@ -32,9 +33,9 @@ Source URLs available:
 ${JSON.stringify(searchResult.sources, null, 2)}
 
 Instructions:
-1. Extract company overview, main products, and business model based ON SEARCH RESULTS.
-2. Formulate "verifiedFacts" citing exact source URLs.
-3. Formulate "strategicInferences" connecting verified facts to interview expectations for ${cleanRole}.
+1. Extract company overview, main products, and business model strictly based ON SEARCH RESULTS.
+2. Formulate "verifiedFacts" citing exact source URLs from the available sources.
+3. Formulate "strategicInferences" connecting verified facts to interview expectations for "${cleanRole}".
 4. If internal rubrics, live question banks, or proprietary details are not found in sources, list them under "unavailableInformation". DO NOT FABRICATE INFORMATION.
 
 Return JSON strictly matching this schema:

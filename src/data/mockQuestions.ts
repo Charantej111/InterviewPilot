@@ -103,6 +103,7 @@ export const mockSampleFeedback: QuestionFeedback = {
   tryThisNextTime: {
     framework: 'STAR (Situation → Task → Action → Result) with Metric Guardrails',
     suggestion: 'Explicitly state your personal hypothesis before the experiment and state the baseline metric alongside the final result.',
+    promptToImprove: 'Re-run this scenario stating the baseline conversion rate before your intervention.',
     examplePhrasing: '"My hypothesis was that OCR auto-cropping would remove 70% of manual retries. I owned the PRD and partner selection, which moved our 7-day activation from 52% to 64% while maintaining our 99.4% fraud filter threshold."'
   }
 };

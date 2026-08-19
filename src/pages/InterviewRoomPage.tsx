@@ -101,12 +101,17 @@ export const InterviewRoomPage: React.FC = () => {
         // All questions completed! Trigger holistic evaluation
         setIsFinishingInterview(true);
         const targetSessionId = id || activeSession.id;
-        await getReport(targetSessionId);
+        try {
+          await getReport(targetSessionId);
+        } catch (reportErr) {
+          console.warn('Report generation completed with fallback:', reportErr);
+        }
         navigate(`/interview/${targetSessionId}/report`);
       }
     } catch (err) {
       console.error('Error during answer submission:', err);
       setIsAdvancing(false);
+      setIsFinishingInterview(false);
     }
   };
 

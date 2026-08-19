@@ -64,6 +64,7 @@ export const sampleActiveSession: InterviewSession = {
   id: 'sess_acme_pm_01',
   createdAt: '2026-08-15T14:20:00Z',
   status: 'in_progress',
+  mode: 'text',
   jobTitle: 'Product Manager Intern',
   company: 'Acme Corp',
   interviewType: 'mixed',

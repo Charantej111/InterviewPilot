@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   InterviewSession, 
   Question, 
@@ -8,6 +8,11 @@ import {
   InterviewDifficulty, 
   InterviewDuration,
   InterviewStyle,
+  InterviewMode,
+  VoiceStatus,
+  InterviewEngineState,
+  ConversationTurn,
+  InterviewConversationState,
 } from '../types/interview';
 import { CandidateProfile } from '../types/resume';
 import { JobProfile } from '../types/jobDescription';
@@ -20,9 +25,9 @@ import { interviewService } from '../services/supabase/interviewService';
 import { resumeService } from '../services/supabase/resumeService';
 import { jobDescriptionService } from '../services/supabase/jobDescriptionService';
 import { companyResearchService } from '../services/supabase/companyResearchService';
-import { matchAnalysisService } from '../services/supabase/matchAnalysisService';
 import { aiService } from '../services/supabase/aiService';
 import { evaluationService } from '../services/supabase/evaluationService';
+import { voiceManager } from '../services/voice/voiceManager';
 import { storage } from '../lib/storage';
 
 export interface SetupDraft {
@@ -45,6 +50,7 @@ export interface SetupDraft {
   interviewStyle: InterviewStyle;
   focusAreas: string[];
   tailoredQuestions: Question[];
+  mode: InterviewMode;
 }
 
 interface InterviewContextType {
@@ -56,23 +62,39 @@ interface InterviewContextType {
   researchCompanyContext: (companyName: string, role: string) => Promise<CompanyResearchData>;
   updateGapPriority: (gapId: string, priority: GapPriority) => void;
   prepareTailoredInterview: () => Promise<Question[]>;
-  createInterviewFromDraft: () => Promise<InterviewSession>;
+  createInterviewFromDraft: (mode?: InterviewMode) => Promise<InterviewSession>;
+  
+  // Shared Interview Engine State
   activeSession: InterviewSession;
   activeQuestion: Question;
+  engineState: InterviewEngineState;
+  voiceStatus: VoiceStatus;
+  liveTranscript: string;
+  interviewerSpokenText: string;
   latestFeedback: QuestionFeedback | null;
   finalReport: FinalReport | null;
   isEvaluating: boolean;
   isPreparingNextQuestion: boolean;
+  isInterrupted: boolean;
+  
+  // Time Management
   timerSeconds: number;
+  remainingSeconds: number;
   isTimerRunning: boolean;
   startTimer: () => void;
   pauseTimer: () => void;
   resetTimer: () => void;
+
+  // Actions
   loadSession: (sessionId: string) => Promise<void>;
+  startVoiceSession: () => Promise<void>;
+  stopVoiceSession: () => Promise<void>;
+  switchToTextMode: () => Promise<void>;
   submitCandidateAnswer: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => Promise<QuestionFeedback>;
   advanceToNextQuestion: () => Promise<boolean>;
   getReport: (sessionId?: string) => Promise<FinalReport>;
   terminateActiveSession: (reason?: string) => Promise<void>;
+  triggerBargeIn: () => void;
 }
 
 const defaultSetupDraft: SetupDraft = {
@@ -96,6 +118,7 @@ const defaultSetupDraft: SetupDraft = {
     'Execution, Trade-offs & Sprint Delivery',
   ],
   tailoredQuestions: [],
+  mode: 'text',
 };
 
 const InterviewContext = createContext<InterviewContextType | undefined>(undefined);
@@ -111,12 +134,48 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     storage.get('current_session', sampleActiveSession)
   );
 
+  // State Machine & Engine States
+  const [engineState, setEngineState] = useState<InterviewEngineState>('ready');
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle');
+  const [liveTranscript, setLiveTranscript] = useState<string>('');
+  const [interviewerSpokenText, setInterviewerSpokenText] = useState<string>('');
+  const [isInterrupted, setIsInterrupted] = useState<boolean>(false);
+
   const [latestFeedback, setLatestFeedback] = useState<QuestionFeedback | null>(null);
   const [finalReport, setFinalReport] = useState<FinalReport | null>(sampleFinalReport);
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
   const [isPreparingNextQuestion, setIsPreparingNextQuestion] = useState<boolean>(false);
+
+  // Time tracking
   const [timerSeconds, setTimerSeconds] = useState<number>(0);
+  const [remainingSeconds, setRemainingSeconds] = useState<number>(() => (activeSession.durationMinutes || 20) * 60);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+
+  // Rolling Conversation State Ref
+  const conversationStateRef = useRef<InterviewConversationState>({
+    currentQuestionId: '',
+    currentQuestionText: '',
+    conversationSummary: '',
+    recentTurns: [],
+    followUpsUsed: 0,
+    remainingTime: 20 * 60,
+  });
+
+  // Timer Tick Effect
+  useEffect(() => {
+    let interval: any;
+    if (isTimerRunning && remainingSeconds > 0) {
+      interval = setInterval(() => {
+        setTimerSeconds((prev) => prev + 1);
+        setRemainingSeconds((prev) => {
+          const nextRemaining = Math.max(0, prev - 1);
+          conversationStateRef.current.remainingTime = nextRemaining;
+          return nextRemaining;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning, remainingSeconds]);
 
   const updateSetupDraft = (updates: Partial<SetupDraft>) => {
     setSetupDraft((prev) => {
@@ -132,12 +191,21 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const uploadResumeFile = async (file: File) => {
-    const record = await resumeService.uploadResume(file);
-    const profile = await aiService.extractResumeProfile(file.name, file.size);
+    let record: any = { id: `res_${Date.now()}`, fileName: file.name, fileSizeFormatted: `${Math.round(file.size / 1024)} KB` };
+    if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+      try {
+        record = await resumeService.uploadResume(file);
+      } catch (err) {
+        console.warn('Storage upload error, continuing with client extraction:', err);
+      }
+    }
+
+    const fileText = await resumeService.extractTextFromFile(file);
+    const profile = await aiService.extractResumeProfile(file.name, fileText);
 
     updateSetupDraft({
       resumeId: record.id,
-      resumeName: record.fileName,
+      resumeName: record.fileName || file.name,
       resumeFileSize: record.fileSizeFormatted,
       resumeParsed: true,
       candidateProfile: profile,
@@ -145,7 +213,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return {
       resumeId: record.id,
-      fileName: record.fileName,
+      fileName: record.fileName || file.name,
       fileSize: record.fileSizeFormatted,
       profile,
     };
@@ -197,9 +265,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const finalResearch: CompanyResearchData = researchData;
 
-    // Automatically compute or refresh MatchAnalysis if candidate and job exist
+    // Automatically compute Match Analysis if candidate and job exist
     if (setupDraft.candidateProfile && setupDraft.jobProfile) {
-      const match = matchAnalysisService.computeMatch(
+      const match = await aiService.computeMatchAnalysis(
         setupDraft.candidateProfile,
         setupDraft.jobProfile,
         finalResearch
@@ -235,7 +303,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const candidate = setupDraft.candidateProfile || (await aiService.extractResumeProfile(setupDraft.resumeName || 'Resume.pdf'));
     const job = setupDraft.jobProfile || (await aiService.analyzeJobDescription(setupDraft.jobTitle || 'Role', setupDraft.company || 'Company', setupDraft.jobDescriptionText));
     const company = setupDraft.companyResearch;
-    const match = setupDraft.matchAnalysis || matchAnalysisService.computeMatch(candidate, job, company);
+    const match = setupDraft.matchAnalysis || (await aiService.computeMatchAnalysis(candidate, job, company));
 
     const questions = await aiService.prepareInterview({
       resume: candidate,
@@ -262,12 +330,20 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const startTimer = () => setIsTimerRunning(true);
   const pauseTimer = () => setIsTimerRunning(false);
-  const resetTimer = () => setTimerSeconds(0);
+  const resetTimer = () => {
+    setTimerSeconds(0);
+    setRemainingSeconds((activeSession.durationMinutes || 20) * 60);
+  };
 
-  const createInterviewFromDraft = async (): Promise<InterviewSession> => {
+  const createInterviewFromDraft = async (mode: InterviewMode = 'text'): Promise<InterviewSession> => {
     const questionsToUse = setupDraft.tailoredQuestions && setupDraft.tailoredQuestions.length > 0
       ? setupDraft.tailoredQuestions
       : await prepareTailoredInterview();
+
+    const durationSecs = (setupDraft.durationMinutes || 20) * 60;
+    setRemainingSeconds(durationSecs);
+    setTimerSeconds(0);
+    setIsTimerRunning(true);
 
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
       const session = await interviewService.createInterview({
@@ -278,6 +354,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         difficulty: setupDraft.difficulty,
         durationMinutes: setupDraft.durationMinutes,
         interviewStyle: setupDraft.interviewStyle,
+        mode,
         jobDescriptionText: setupDraft.jobDescriptionText,
         resumeName: setupDraft.resumeName || 'Candidate_Resume.pdf',
         resumeId: setupDraft.resumeId,
@@ -287,15 +364,22 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         matchAnalysis: setupDraft.matchAnalysis as unknown as Record<string, unknown>,
         questions: questionsToUse,
       });
+
       setActiveSession(session);
       storage.set('current_session', session);
-      setTimerSeconds(0);
-      setIsTimerRunning(true);
+      setEngineState('starting');
+
+      if (mode === 'voice') {
+        setTimeout(() => startVoiceSession(), 500);
+      }
+
       return session;
     } else {
       const fallbackSession: InterviewSession = {
         ...sampleActiveSession,
         id: `sess_${Date.now()}`,
+        mode,
+        voiceStatus: mode === 'voice' ? 'connecting' : 'idle',
         jobTitle: setupDraft.jobTitle || 'Product Lead',
         company: setupDraft.company || 'Target Company',
         interviewType: setupDraft.interviewType,
@@ -307,10 +391,15 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         questions: questionsToUse,
         focusAreas: setupDraft.focusAreas,
       };
+
       setActiveSession(fallbackSession);
       storage.set('current_session', fallbackSession);
-      setTimerSeconds(0);
-      setIsTimerRunning(true);
+      setEngineState('starting');
+
+      if (mode === 'voice') {
+        setTimeout(() => startVoiceSession(), 500);
+      }
+
       return fallbackSession;
     }
   };
@@ -333,70 +422,268 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const activeQuestion: Question = 
     activeSession.questions[activeSession.currentQuestionIndex] || activeSession.questions[0];
 
+  // Update conversation state tracking when question changes
+  useEffect(() => {
+    if (activeQuestion) {
+      conversationStateRef.current.currentQuestionId = activeQuestion.id;
+      conversationStateRef.current.currentQuestionText = activeQuestion.text;
+    }
+  }, [activeQuestion]);
+
+  // Voice Mode: Start Real-Time Conversational Voice Session
+  const startVoiceSession = async () => {
+    const provider = voiceManager.getVoiceProvider();
+    setVoiceStatus('connecting');
+
+    try {
+      let config: any = null;
+      try {
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_')) {
+          config = await voiceManager.createVoiceSession(activeSession.id);
+        }
+      } catch (voiceErr) {
+        console.warn('Remote voice session creation returned warning, using client fallback config:', voiceErr);
+      }
+
+      if (!config) {
+        config = {
+          voiceSessionId: `vses_${Date.now()}`,
+          interviewId: activeSession.id,
+          provider: 'gemini_live' as const,
+          candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+          targetRole: activeSession.jobTitle,
+          company: activeSession.company,
+          timeLimitMinutes: activeSession.durationMinutes,
+        };
+      }
+
+      await provider.connect(config, {
+        onStatusChange: (status) => {
+          setVoiceStatus(status);
+        },
+        onTranscript: (text, _isFinal, isCandidate) => {
+          if (isCandidate) {
+            setLiveTranscript(text);
+          }
+        },
+        onSpeechStart: (speaker) => {
+          if (speaker === 'candidate') {
+            setIsInterrupted(false);
+            setEngineState('listening');
+          } else {
+            setEngineState('asking');
+          }
+        },
+        onSpeechEnd: async (speaker, finalTranscript) => {
+          if (speaker === 'candidate' && finalTranscript && finalTranscript.trim().length > 10) {
+            // Candidate finished turn -> Submit verbal response
+            await submitCandidateAnswer(finalTranscript.trim(), 'voice', 60);
+          }
+        },
+        onInterruption: () => {
+          setIsInterrupted(true);
+          setEngineState('listening');
+        },
+        onError: (err) => {
+          console.warn('Voice Provider error event:', err);
+          setVoiceStatus('idle');
+        },
+      });
+
+      setVoiceStatus('connected');
+      setActiveSession((prev) => ({ ...prev, mode: 'voice', voiceStatus: 'connected' }));
+
+      // AI speaks the first question aloud
+      if (activeQuestion) {
+        setEngineState('asking');
+        const introRemark = await aiService.generateInterviewerRemark({
+          action: activeSession.currentQuestionIndex === 0 ? 'intro' : 'ask_question',
+          candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+          role: activeSession.jobTitle,
+          company: activeSession.company,
+          style: activeSession.interviewStyle,
+          question: activeQuestion,
+        });
+
+        setInterviewerSpokenText(introRemark);
+        await provider.speak(introRemark);
+        await provider.startListening();
+        setEngineState('listening');
+      }
+    } catch (err: any) {
+      console.warn('Voice session fallback handled:', err);
+      setVoiceStatus('idle');
+    }
+  };
+
+  const stopVoiceSession = async () => {
+    const provider = voiceManager.getVoiceProvider();
+    await provider.disconnect();
+    setVoiceStatus('idle');
+  };
+
+  const switchToTextMode = async () => {
+    await stopVoiceSession();
+    setActiveSession((prev) => ({ ...prev, mode: 'text', voiceStatus: 'idle' }));
+    if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+      await interviewService.updateSessionProgress(
+        user.id,
+        activeSession.id,
+        activeSession.currentQuestionIndex,
+        activeSession.status,
+        remainingSeconds,
+        'text',
+        'idle'
+      );
+    }
+  };
+
+  const triggerBargeIn = () => {
+    const provider = voiceManager.getVoiceProvider();
+    provider.stopAudio();
+    setIsInterrupted(true);
+  };
+
+  /**
+   * Submits a candidate answer, executes real AI evaluation, and manages follow-up decisions.
+   */
   const submitCandidateAnswer = async (
     answerText: string, 
     inputMode: 'text' | 'voice', 
     durationSecs: number
   ): Promise<QuestionFeedback> => {
     setIsEvaluating(true);
-    try {
-      let feedback: QuestionFeedback;
+    setEngineState('processing');
 
-      if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_acme')) {
-        const { answerId } = await interviewService.submitAnswer(
+    try {
+      let answerId = `ans_${Date.now()}`;
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_')) {
+        const res = await interviewService.submitAnswer(
           user.id,
           activeSession.id,
           activeQuestion.id,
           answerText,
           inputMode,
-          durationSecs
+          durationSecs,
+          inputMode === 'voice' ? answerText : undefined
         );
+        answerId = res.answerId;
+      }
 
-        feedback = await evaluationService.evaluateAndSaveAnswer({
+      // 1. Layer 1 & 2: Real AI Evaluation & Follow-up Trigger Analysis
+      let feedbackResult: QuestionFeedback & { followUpNeeded?: boolean; followUpTriggerReason?: string; followUpTopic?: string };
+
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_')) {
+        feedbackResult = await evaluationService.evaluateAndSaveAnswer({
           userId: user.id,
           interviewId: activeSession.id,
           answerId,
-          questionId: activeQuestion.id,
-          dimensions: {
-            relevance: 8.0,
-            structure: 7.0,
-            clarity: 8.0,
-            depth: 6.5,
-            evidence: 6.0,
-            roleAlignment: 7.5,
-          },
+          question: activeQuestion,
+          answerText,
+          role: activeSession.jobTitle,
+          company: activeSession.company,
+          difficulty: activeSession.difficulty,
+          remainingMinutes: Math.round(remainingSeconds / 60),
         });
       } else {
-        await new Promise((r) => setTimeout(r, 1200));
-        feedback = {
-          questionId: activeQuestion.id,
-          overallScore: 7.4,
-          breakdown: {
-            relevance: 8.0,
-            structure: 6.5,
-            clarity: 8.0,
-            depth: 6.0,
-            evidence: 5.5,
-            roleAlignment: 7.5,
-          },
-          whatWorked: [
-            'Clearly explained the problem context and user pain points.',
-            'Connected the technical decision directly to customer impact.',
-          ],
-          whatHeldYouBack: [
-            'The outcome metrics lacked baseline comparison numbers.',
-            'Your answer didn\'t state your individual ownership explicitly.',
-          ],
-          tryThisNextTime: {
-            framework: 'STAR Framework',
-            suggestion: 'State the starting baseline before metric gains to quantify lift.',
-            examplePhrasing: 'Before our initiative, the conversion rate was 14%...',
-          },
-        };
+        feedbackResult = await aiService.evaluateAnswer({
+          question: activeQuestion,
+          answerText,
+          role: activeSession.jobTitle,
+          company: activeSession.company,
+          difficulty: activeSession.difficulty,
+          remainingMinutes: Math.round(remainingSeconds / 60),
+        });
       }
 
-      setLatestFeedback(feedback);
+      setLatestFeedback(feedbackResult);
 
+      // Record Turn in Rolling History
+      const turn: ConversationTurn = {
+        role: 'candidate',
+        text: answerText,
+        timestamp: new Date().toISOString(),
+        questionId: activeQuestion.id,
+        isFollowUp: activeQuestion.type === 'follow_up',
+      };
+      conversationStateRef.current.recentTurns.push(turn);
+      conversationStateRef.current.conversationSummary += `\nCandidate on Q (${activeQuestion.category}): ${answerText.slice(0, 140)}...`;
+
+      // 2. Adaptive Follow-up Decision Loop
+      const canTriggerFollowUp = 
+        feedbackResult.followUpNeeded &&
+        activeQuestion.type === 'initial' &&
+        conversationStateRef.current.followUpsUsed < 2 &&
+        remainingSeconds > 180;
+
+      if (canTriggerFollowUp) {
+        setEngineState('follow_up');
+        conversationStateRef.current.followUpsUsed += 1;
+
+        try {
+          const followUpQ = await aiService.generateAdaptiveFollowUp({
+            parentQuestion: activeQuestion,
+            candidateAnswer: answerText,
+            triggerReason: feedbackResult.followUpTriggerReason || 'Probe missing metric evidence or architecture trade-off.',
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            difficulty: activeSession.difficulty,
+            order: activeSession.currentQuestionIndex + 2,
+          });
+
+          // Insert into session & DB questions
+          let savedFollowUp = followUpQ;
+          if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_')) {
+            savedFollowUp = await interviewService.insertAdaptiveQuestion(
+              activeSession.id,
+              followUpQ,
+              activeSession.currentQuestionIndex + 2
+            );
+          }
+
+          const updatedQuestions = [...activeSession.questions];
+          updatedQuestions.splice(activeSession.currentQuestionIndex + 1, 0, savedFollowUp);
+
+          const updatedSession: InterviewSession = {
+            ...activeSession,
+            questions: updatedQuestions,
+            answers: {
+              ...activeSession.answers,
+              [activeQuestion.id]: {
+                questionId: activeQuestion.id,
+                answerText,
+                inputMode,
+                durationSeconds: durationSecs,
+                submittedAt: new Date().toISOString(),
+                transcript: inputMode === 'voice' ? answerText : undefined,
+              },
+            },
+            feedbacks: {
+              ...activeSession.feedbacks,
+              [activeQuestion.id]: feedbackResult,
+            },
+          };
+
+          setActiveSession(updatedSession);
+          storage.set('current_session', updatedSession);
+
+          // If in Voice Mode, speak the follow-up prompt aloud
+          if (activeSession.mode === 'voice') {
+            const provider = voiceManager.getVoiceProvider();
+            setEngineState('asking');
+            setInterviewerSpokenText(savedFollowUp.text);
+            await provider.speak(savedFollowUp.text);
+            await provider.startListening();
+            setEngineState('listening');
+          }
+
+          return feedbackResult;
+        } catch (followUpErr) {
+          console.warn('Failed to inject adaptive follow-up, continuing normal flow:', followUpErr);
+        }
+      }
+
+      // Normal session state update without immediate follow-up
       const updatedSession: InterviewSession = {
         ...activeSession,
         answers: {
@@ -406,18 +693,19 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             answerText,
             inputMode,
             durationSeconds: durationSecs,
-            submittedAt: new Date().toISOString()
-          }
+            submittedAt: new Date().toISOString(),
+            transcript: inputMode === 'voice' ? answerText : undefined,
+          },
         },
         feedbacks: {
           ...activeSession.feedbacks,
-          [activeQuestion.id]: feedback
-        }
+          [activeQuestion.id]: feedbackResult,
+        },
       };
       setActiveSession(updatedSession);
       storage.set('current_session', updatedSession);
 
-      return feedback;
+      return feedbackResult;
     } finally {
       setIsEvaluating(false);
     }
@@ -426,33 +714,74 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const advanceToNextQuestion = async (): Promise<boolean> => {
     setIsPreparingNextQuestion(true);
     try {
-      await new Promise((r) => setTimeout(r, 600));
       const nextIndex = activeSession.currentQuestionIndex + 1;
       
-      if (nextIndex < activeSession.questions.length) {
+      if (nextIndex < activeSession.questions.length && remainingSeconds > 60) {
+        const nextQ = activeSession.questions[nextIndex];
         const updatedSession = {
           ...activeSession,
           currentQuestionIndex: nextIndex,
+          currentQuestionId: nextQ?.id || null,
         };
         setActiveSession(updatedSession);
         storage.set('current_session', updatedSession);
+        setLiveTranscript('');
 
         if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex);
+          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
         }
+
+        // Voice Mode: Speak the next question aloud
+        if (activeSession.mode === 'voice') {
+          const provider = voiceManager.getVoiceProvider();
+          setEngineState('asking');
+          const bridgeRemark = await aiService.generateInterviewerRemark({
+            action: 'transition',
+            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            style: activeSession.interviewStyle,
+            question: nextQ,
+            conversationSummary: conversationStateRef.current.conversationSummary,
+          });
+
+          setInterviewerSpokenText(bridgeRemark);
+          await provider.speak(bridgeRemark);
+          await provider.startListening();
+          setEngineState('listening');
+        }
+
         return true;
       } else {
+        // Complete interview session
+        setEngineState('completing');
         const updatedSession = {
           ...activeSession,
           status: 'completed' as const,
-          completedAt: new Date().toISOString()
+          completedAt: new Date().toISOString(),
         };
         setActiveSession(updatedSession);
         storage.set('current_session', updatedSession);
 
         if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'completed');
+          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'completed', 0);
         }
+
+        // Voice Mode: Deliver closing spoken remark
+        if (activeSession.mode === 'voice') {
+          const provider = voiceManager.getVoiceProvider();
+          const closing = await aiService.generateInterviewerRemark({
+            action: 'closing',
+            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+          });
+          setInterviewerSpokenText(closing);
+          await provider.speak(closing);
+          await provider.disconnect();
+        }
+
+        setEngineState('completed');
         return false;
       }
     } finally {
@@ -463,12 +792,26 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const getReport = async (sessionId?: string): Promise<FinalReport> => {
     const targetSessionId = sessionId || activeSession.id;
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !targetSessionId.startsWith('sess_acme')) {
-      const report = await evaluationService.generateAndSaveFinalReport(user.id, targetSessionId);
-      setFinalReport(report);
-      return report;
+      try {
+        const report = await evaluationService.generateAndSaveFinalReport(user.id, targetSessionId);
+        setFinalReport(report);
+        return report;
+      } catch (err) {
+        console.warn('generateAndSaveFinalReport encountered issue, falling back to direct report synthesis:', err);
+      }
     }
-    setFinalReport(sampleFinalReport);
-    return sampleFinalReport;
+
+    const report = await aiService.generateFinalReport({
+      interviewId: targetSessionId,
+      role: activeSession.jobTitle,
+      company: activeSession.company,
+      questions: activeSession.questions,
+      answers: activeSession.answers,
+      evaluations: Object.values(activeSession.feedbacks || {}),
+    });
+
+    setFinalReport(report);
+    return report;
   };
 
   const terminateActiveSession = async () => {
@@ -478,6 +821,10 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return updated;
     });
     setIsTimerRunning(false);
+
+    if (activeSession.mode === 'voice') {
+      await stopVoiceSession();
+    }
 
     if (isAuthenticated && user?.id && activeSession?.id && !user.id.startsWith('mock_')) {
       try {
@@ -507,20 +854,30 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         createInterviewFromDraft,
         activeSession,
         activeQuestion,
+        engineState,
+        voiceStatus,
+        liveTranscript,
+        interviewerSpokenText,
         latestFeedback,
         finalReport,
         isEvaluating,
         isPreparingNextQuestion,
+        isInterrupted,
         timerSeconds,
+        remainingSeconds,
         isTimerRunning,
         startTimer,
         pauseTimer,
         resetTimer,
         loadSession,
+        startVoiceSession,
+        stopVoiceSession,
+        switchToTextMode,
         submitCandidateAnswer,
         advanceToNextQuestion,
         getReport,
         terminateActiveSession,
+        triggerBargeIn,
       }}
     >
       {children}

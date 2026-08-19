@@ -2,6 +2,47 @@ export type InterviewType = 'behavioral' | 'product_case' | 'technical' | 'mixed
 export type InterviewDifficulty = 'beginner' | 'intermediate' | 'advanced';
 export type InterviewDuration = 10 | 15 | 20 | 30 | 45;
 export type InterviewStyle = 'friendly' | 'realistic' | 'challenging';
+export type InterviewMode = 'text' | 'voice';
+
+export type VoiceStatus = 
+  | 'idle' 
+  | 'connecting' 
+  | 'connected' 
+  | 'speaking' 
+  | 'listening' 
+  | 'processing' 
+  | 'interrupted'
+  | 'reconnecting' 
+  | 'disconnected' 
+  | 'error';
+
+export type InterviewEngineState = 
+  | 'preparing'
+  | 'ready'
+  | 'starting'
+  | 'asking'
+  | 'listening'
+  | 'processing'
+  | 'follow_up'
+  | 'completing'
+  | 'completed';
+
+export interface ConversationTurn {
+  role: 'interviewer' | 'candidate';
+  text: string;
+  timestamp: string;
+  isFollowUp?: boolean;
+  questionId?: string;
+}
+
+export interface InterviewConversationState {
+  currentQuestionId: string;
+  currentQuestionText: string;
+  conversationSummary: string;
+  recentTurns: ConversationTurn[];
+  followUpsUsed: number;
+  remainingTime: number;
+}
 
 export interface QuestionEvaluationCriteria {
   coreCompetency: string;
@@ -29,7 +70,6 @@ export interface Question {
   redFlags?: string[];
   evaluationCriteria?: QuestionEvaluationCriteria;
   adaptiveFollowUpTriggers?: AdaptiveFollowUpTrigger[];
-  sampleAnswer?: string;
   expectedKeyPoints?: string[];
 }
 
@@ -39,11 +79,19 @@ export interface CandidateAnswer {
   durationSeconds: number;
   inputMode: 'text' | 'voice';
   submittedAt: string;
+  transcript?: string;
+}
+
+export interface CoachingSuggestion {
+  framework: string;
+  suggestion: string;
+  promptToImprove: string;
+  examplePhrasing?: string;
 }
 
 export interface QuestionFeedback {
   questionId: string;
-  overallScore: number; // 0 - 10
+  overallScore: number; // 0 - 10 calculated deterministically
   breakdown: {
     relevance: number;
     structure: number;
@@ -54,11 +102,7 @@ export interface QuestionFeedback {
   };
   whatWorked: string[];
   whatHeldYouBack: string[];
-  tryThisNextTime: {
-    framework: string;
-    suggestion: string;
-    examplePhrasing: string;
-  };
+  tryThisNextTime: CoachingSuggestion;
 }
 
 export interface InterviewSession {
@@ -66,6 +110,11 @@ export interface InterviewSession {
   createdAt: string;
   completedAt?: string;
   status: 'draft' | 'in_progress' | 'evaluating' | 'completed' | 'failed';
+  mode: InterviewMode;
+  voiceProvider?: string | null;
+  voiceSessionId?: string | null;
+  voiceStatus?: VoiceStatus;
+  remainingTime?: number;
   jobTitle: string;
   company: string;
   interviewType: InterviewType;
@@ -87,6 +136,7 @@ export interface InterviewSession {
   jobDescriptionText: string;
   questions: Question[];
   currentQuestionIndex: number;
+  currentQuestionId?: string | null;
   answers: Record<string, CandidateAnswer>;
   feedbacks: Record<string, QuestionFeedback>;
   finalReportId?: string;

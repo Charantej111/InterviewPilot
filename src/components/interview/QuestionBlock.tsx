@@ -24,13 +24,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
 
       {/* Main Question Text */}
       <div className="space-y-2">
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground leading-tight">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground leading-snug">
           {question.text}
         </h1>
-
-        <p className="text-xs sm:text-sm text-foreground-muted">
-          {question.contextExplanation || 'Focus on your thought process and the outcome.'}
-        </p>
       </div>
     </div>
   );

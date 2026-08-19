@@ -38,17 +38,31 @@ export const SetupPage: React.FC = () => {
   const [mode, setMode] = useState<'input' | 'ready'>('input');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState('Extracting resume & job signals...');
+  const [loadingSteps, setLoadingSteps] = useState<import('../components/ui/AILoader').LoadingStep[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Resume Upload Handler
   const handleFileUpload = async (file: File) => {
     setErrorMessage(null);
+    setIsProcessing(true);
+    setProcessingStage(`Extracting candidate profile from ${file.name}...`);
+    setLoadingSteps([
+      { label: `Parsing ${file.name} deliverables`, status: 'in_progress' },
+      { label: 'Structuring candidate competencies & skills', status: 'pending' },
+    ]);
+
     try {
       await uploadResumeFile(file);
+      setLoadingSteps([
+        { label: `Parsed ${file.name} deliverables`, status: 'completed' },
+        { label: 'Candidate profile extracted successfully', status: 'completed' },
+      ]);
     } catch (err: any) {
       console.error('Upload error:', err);
       setErrorMessage(err.message || 'Failed to upload resume document.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -61,20 +75,48 @@ export const SetupPage: React.FC = () => {
 
     setErrorMessage(null);
     setIsProcessing(true);
+    
+    setLoadingSteps([
+      { label: `Deconstruct ${setupDraft.jobTitle} hiring bar`, status: 'in_progress' },
+      { label: `Research ${setupDraft.company} context & verified facts`, status: 'pending' },
+      { label: 'Calculate fit & map actionable gaps', status: 'pending' },
+      { label: 'Synthesize tailored anchor interview questions', status: 'pending' },
+    ]);
 
     try {
       // 1. Analyze JD
-      setProcessingStage('Deconstructing job requirements...');
+      setProcessingStage(`Deconstructing ${setupDraft.jobTitle} requirements...`);
       const jdText = setupDraft.jobDescriptionText.trim() || `${setupDraft.jobTitle} at ${setupDraft.company}`;
       await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
 
+      setLoadingSteps([
+        { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
+        { label: `Researching ${setupDraft.company} context & verified facts`, status: 'in_progress' },
+        { label: 'Calculate fit & map actionable gaps', status: 'pending' },
+        { label: 'Synthesize tailored anchor interview questions', status: 'pending' },
+      ]);
+
       // 2. Company Research
-      setProcessingStage(`Gathering ${setupDraft.company} context...`);
+      setProcessingStage(`Gathering grounded ${setupDraft.company} intelligence...`);
       await researchCompanyContext(setupDraft.company, setupDraft.jobTitle);
 
+      setLoadingSteps([
+        { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
+        { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
+        { label: 'Calculated 45/30/25 fit & mapped actionable gaps', status: 'completed' },
+        { label: 'Synthesizing tailored anchor interview questions...', status: 'in_progress' },
+      ]);
+
       // 3. Prepare tailored interview
-      setProcessingStage('Calibrating personalized interview probes...');
+      setProcessingStage('Calibrating tailored interview questions & rubric...');
       await prepareTailoredInterview();
+
+      setLoadingSteps([
+        { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
+        { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
+        { label: 'Calculated 45/30/25 fit & mapped actionable gaps', status: 'completed' },
+        { label: 'Tailored anchor interview questions ready', status: 'completed' },
+      ]);
 
       setMode('ready');
     } catch (err: any) {
@@ -88,6 +130,7 @@ export const SetupPage: React.FC = () => {
   // Launch Simulation
   const handleLaunchSimulation = async () => {
     setIsProcessing(true);
+    setProcessingStage('Initializing interview session...');
     try {
       const session = await createInterviewFromDraft();
       navigate('/interview/preview', { state: { sessionId: session.id } });
@@ -138,6 +181,7 @@ export const SetupPage: React.FC = () => {
           <AILoader
             title="Calibrating Simulation Engine"
             stage={processingStage}
+            steps={loadingSteps}
           />
         )}
 

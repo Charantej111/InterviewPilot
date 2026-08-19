@@ -15,32 +15,41 @@ export type Database = {
       answers: {
         Row: {
           answer_text: string
+          answer_type: string | null
+          audio_storage_path: string | null
           created_at: string
           duration_seconds: number
           id: string
           interview_id: string
           question_id: string
           submission_type: string
+          transcript: string | null
           user_id: string
         }
         Insert: {
           answer_text: string
+          answer_type?: string | null
+          audio_storage_path?: string | null
           created_at?: string
           duration_seconds?: number
           id?: string
           interview_id: string
           question_id: string
           submission_type?: string
+          transcript?: string | null
           user_id: string
         }
         Update: {
           answer_text?: string
+          answer_type?: string | null
+          audio_storage_path?: string | null
           created_at?: string
           duration_seconds?: number
           id?: string
           interview_id?: string
           question_id?: string
           submission_type?: string
+          transcript?: string | null
           user_id?: string
         }
         Relationships: [
@@ -232,6 +241,7 @@ export type Database = {
           company_research_id: string | null
           completed_at: string | null
           created_at: string
+          current_question_id: string | null
           current_question_index: number
           difficulty: string
           duration_minutes: number
@@ -243,22 +253,29 @@ export type Database = {
           interview_type: string
           job_description_id: string | null
           match_analysis: Json | null
+          mode: string | null
           overall_score: number | null
           processing_completed_at: string | null
           processing_error: string | null
           processing_started_at: string | null
           processing_status: string
           readiness_percentage: number | null
+          remaining_time: number | null
           resume_id: string | null
           status: string
           target_role: string
+          transcript_status: string | null
           user_id: string
+          voice_provider: string | null
+          voice_session_id: string | null
+          voice_status: string | null
         }
         Insert: {
           company: string
           company_research_id?: string | null
           completed_at?: string | null
           created_at?: string
+          current_question_id?: string | null
           current_question_index?: number
           difficulty: string
           duration_minutes: number
@@ -270,22 +287,29 @@ export type Database = {
           interview_type: string
           job_description_id?: string | null
           match_analysis?: Json | null
+          mode?: string | null
           overall_score?: number | null
           processing_completed_at?: string | null
           processing_error?: string | null
           processing_started_at?: string | null
           processing_status?: string
           readiness_percentage?: number | null
+          remaining_time?: number | null
           resume_id?: string | null
           status?: string
           target_role: string
+          transcript_status?: string | null
           user_id: string
+          voice_provider?: string | null
+          voice_session_id?: string | null
+          voice_status?: string | null
         }
         Update: {
           company?: string
           company_research_id?: string | null
           completed_at?: string | null
           created_at?: string
+          current_question_id?: string | null
           current_question_index?: number
           difficulty?: string
           duration_minutes?: number
@@ -297,16 +321,22 @@ export type Database = {
           interview_type?: string
           job_description_id?: string | null
           match_analysis?: Json | null
+          mode?: string | null
           overall_score?: number | null
           processing_completed_at?: string | null
           processing_error?: string | null
           processing_started_at?: string | null
           processing_status?: string
           readiness_percentage?: number | null
+          remaining_time?: number | null
           resume_id?: string | null
           status?: string
           target_role?: string
+          transcript_status?: string | null
           user_id?: string
+          voice_provider?: string | null
+          voice_session_id?: string | null
+          voice_status?: string | null
         }
         Relationships: [
           {
@@ -314,6 +344,13 @@ export type Database = {
             columns: ["company_research_id"]
             isOneToOne: false
             referencedRelation: "company_research"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "interviews_current_question_id_fkey"
+            columns: ["current_question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
             referencedColumns: ["id"]
           },
           {

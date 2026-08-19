@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { computeDeterministicMatchScore } from '../_shared/scoring.ts';
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -14,6 +15,8 @@ serve(async (req) => {
       candidateProfile?.summary || '',
       ...(candidateProfile?.skills || []),
       ...(candidateProfile?.strengths || []),
+      ...(candidateProfile?.certifications || []),
+      ...(candidateProfile?.achievements || []),
       ...(candidateProfile?.experience || []).flatMap((e: any) => [e.role, e.company, ...(e.highlights || [])]),
       ...(candidateProfile?.projects || []).flatMap((p: any) => [p.name, p.description, ...(p.technologies || [])]),
     ]
@@ -22,15 +25,15 @@ serve(async (req) => {
 
     const requiredSkills: string[] = jobProfile?.requiredSkills && jobProfile.requiredSkills.length > 0
       ? jobProfile.requiredSkills
-      : ['Core Problem Solving', 'Communication'];
+      : ['Core Problem Solving', 'Communication & Collaboration', 'Execution Discipline'];
     const competencies: string[] = jobProfile?.competencies && jobProfile.competencies.length > 0
       ? jobProfile.competencies
-      : ['Cross-functional Leadership', 'Execution'];
+      : ['First-Principles Thinking', 'Stakeholder Management', 'System Scalability'];
 
     const matchingStrengths: any[] = [];
     const actionableGaps: any[] = [];
 
-    // 1. Required Skills (45 max)
+    // 1. Required Skills (45 max deterministic points)
     let matchedSkillsCount = 0;
     requiredSkills.forEach((skill: string, idx: number) => {
       const skillLower = skill.toLowerCase();
@@ -41,7 +44,7 @@ serve(async (req) => {
         matchedSkillsCount++;
         matchingStrengths.push({
           competency: skill,
-          evidence: `Evidenced in candidate profile projects and experience.`,
+          evidence: `Evidenced in candidate profile projects and experience highlights.`,
           relevanceScore: 90,
         });
       } else {
@@ -56,14 +59,14 @@ serve(async (req) => {
       }
     });
 
-    const requiredSkillsCoverage = Math.round((matchedSkillsCount / Math.max(1, requiredSkills.length)) * 45);
+    const requiredCoveragePoints = (matchedSkillsCount / Math.max(1, requiredSkills.length)) * 45;
 
-    // 2. Experience Depth (30 max)
+    // 2. Experience Depth & Alignment (30 max deterministic points)
     const expCount = candidateProfile?.experience?.length || 0;
     const projCount = candidateProfile?.projects?.length || 0;
-    const experienceAlignment = Math.min(30, Math.round(15 + Math.min(expCount * 4, 10) + Math.min(projCount * 3, 5)));
+    const expPoints = Math.min(30, 14 + Math.min(expCount * 4, 10) + Math.min(projCount * 3, 6));
 
-    // 3. Competencies (25 max)
+    // 3. Competencies & Preferred Alignment (25 max deterministic points)
     let matchedCompCount = 0;
     competencies.forEach((comp: string, idx: number) => {
       const compLower = comp.toLowerCase();
@@ -74,7 +77,7 @@ serve(async (req) => {
         matchedCompCount++;
         matchingStrengths.push({
           competency: comp,
-          evidence: `Evidenced across project deliverables and leadership deliverables.`,
+          evidence: `Evidenced across project deliverables and leadership narratives.`,
           relevanceScore: 85,
         });
       } else {
@@ -89,20 +92,21 @@ serve(async (req) => {
       }
     });
 
-    const competenciesMatch = Math.round((matchedCompCount / Math.max(1, competencies.length)) * 25);
-    const totalScore = Math.min(96, Math.max(45, requiredSkillsCoverage + experienceAlignment + competenciesMatch));
+    const compPoints = (matchedCompCount / Math.max(1, competencies.length)) * 25;
+
+    // Deterministic combination:
+    const deterministicBreakdown = computeDeterministicMatchScore(
+      requiredCoveragePoints,
+      expPoints,
+      compPoints
+    );
 
     const companyName = companyResearch?.companyName || jobProfile?.company || 'Target Company';
-    const companyAlignmentSummary = `Candidate demonstrates solid technical and strategic baseline for the ${jobProfile?.role || 'Target'} position at ${companyName}.`;
+    const companyAlignmentSummary = `Candidate demonstrates a ${deterministicBreakdown.totalScore}% quantitative alignment baseline for the ${jobProfile?.role || 'Target'} position at ${companyName}, with strong competencies in core technical deliverables and identified focal areas for interview probing.`;
 
     const matchResult = {
-      matchPercentage: totalScore,
-      deterministicBreakdown: {
-        requiredSkillsCoverage,
-        experienceAlignment,
-        competenciesMatch,
-        totalScore,
-      },
+      matchPercentage: deterministicBreakdown.totalScore,
+      deterministicBreakdown,
       matchingStrengths: matchingStrengths.slice(0, 5),
       actionableGaps,
       companyAlignmentSummary,

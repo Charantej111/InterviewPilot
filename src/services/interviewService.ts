@@ -21,6 +21,7 @@ export const interviewService = {
       id: `sess_${Date.now()}`,
       createdAt: new Date().toISOString(),
       status: 'in_progress',
+      mode: 'text',
       jobTitle: params.jobTitle,
       company: params.company,
       interviewType: params.interviewType,

@@ -41,6 +41,35 @@ export const FinalReportPage: React.FC = () => {
     year: 'numeric',
   });
 
+  const getHiringRecommendation = (score: number) => {
+    if (score >= 8.5) {
+      return {
+        text: '✓ Strong Hire · Recommended for Offer',
+        textColor: 'text-emerald-600 dark:text-emerald-400',
+        badgeBg: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+      };
+    }
+    if (score >= 7.0) {
+      return {
+        text: '✓ Lean Hire · Meets Core Expectations',
+        textColor: 'text-blue-600 dark:text-blue-400',
+        badgeBg: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+      };
+    }
+    if (score >= 5.0) {
+      return {
+        text: '⚠ Lean No Hire · Significant Gaps Identified',
+        textColor: 'text-amber-600 dark:text-amber-400',
+        badgeBg: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+      };
+    }
+    return {
+      text: '✕ No Hire · Did Not Meet Minimum Bar',
+      textColor: 'text-rose-600 dark:text-rose-400',
+      badgeBg: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+    };
+  };
+
   const handleExportPDF = () => {
     setIsExporting(true);
     setTimeout(() => {
@@ -236,7 +265,7 @@ export const FinalReportPage: React.FC = () => {
                     {report.overallScore.toFixed(1)}
                   </span>
                   <span className="text-xs text-foreground-muted font-bold">/ 10</span>
-                  <span className="ml-2.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold">
+                  <span className={`ml-2.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${getHiringRecommendation(report.overallScore).badgeBg}`}>
                     {report.readinessPercentage}% Match
                   </span>
                 </div>
@@ -244,15 +273,14 @@ export const FinalReportPage: React.FC = () => {
 
               <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-zinc-200 dark:border-zinc-800 pt-3 sm:pt-0 sm:pl-5 shrink-0">
                 <span className="text-[9px] uppercase tracking-wider text-foreground-muted block font-bold">Hiring Recommendation</span>
-                <strong className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block mt-0.5 animate-pulse">
-                  ✓ Recommended for Final Loop
+                <strong className={`text-xs font-bold block mt-0.5 ${getHiringRecommendation(report.overallScore).textColor}`}>
+                  {getHiringRecommendation(report.overallScore).text}
                 </strong>
               </div>
             </div>
 
             <p className="text-xs text-foreground-muted leading-relaxed mt-3 pt-3 border-t border-zinc-200/60 dark:border-zinc-800/80">
-              {report.summary ||
-                `Demonstrated structured strategy frameworks, communication clarity, and candidate alignment for the ${targetRole} opening at ${targetCompany}.`}
+              {report.summary}
             </p>
           </div>
 

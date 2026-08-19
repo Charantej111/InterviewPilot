@@ -2,23 +2,33 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { callGeminiStructured } from '../_shared/gemini.ts';
 
-serve(async (req) => {
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { title, company, rawText } = await req.json();
+    const { title, company, rawText, apiKey } = await req.json();
+    const cleanTitle = (title || 'Role').trim();
+    const cleanCompany = (company || 'Company').trim();
+    const cleanText = (rawText || '').trim();
 
     const prompt = `
-Deconstruct the following job description into structured hiring bar requirements for ${title} at ${company}.
+Deconstruct the following job description into structured hiring bar requirements for "${cleanTitle}" at "${cleanCompany}".
+
 Job Description:
-${rawText}
+${cleanText}
+
+Instructions:
+1. Extract the core responsibilities that define day-to-day execution.
+2. Separate REQUIRED non-negotiable skills from PREFERRED bonus qualifications.
+3. Formulate the precise technical/leadership competencies and key interview evaluation signals.
+4. Extract relevant domain keywords.
 
 Return JSON strictly matching this schema:
 {
-  "role": "${title}",
-  "company": "${company}",
+  "role": "${cleanTitle}",
+  "company": "${cleanCompany}",
   "responsibilities": string[],
   "requiredSkills": string[],
   "preferredSkills": string[],
@@ -31,7 +41,8 @@ Return JSON strictly matching this schema:
 
     const jobProfile = await callGeminiStructured(
       prompt,
-      'You are a senior hiring committee architect. Deconstruct job postings into precise technical competencies and interview signals.'
+      'You are a senior hiring committee architect. Deconstruct job postings into precise technical competencies, hiring bar signals, and execution metrics.',
+      { apiKey }
     );
 
     return new Response(JSON.stringify({ jobProfile }), {

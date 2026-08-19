@@ -8,6 +8,8 @@ import {
   InterviewDifficulty, 
   InterviewDuration,
   InterviewStyle,
+  InterviewMode,
+  VoiceStatus,
 } from '../../types/interview';
 import { Json } from '../../types/database.types';
 
@@ -19,6 +21,7 @@ export interface CreateInterviewParams {
   difficulty: InterviewDifficulty;
   durationMinutes: InterviewDuration;
   interviewStyle?: InterviewStyle;
+  mode?: InterviewMode;
   jobDescriptionText: string;
   resumeName: string;
   resumeId?: string;
@@ -51,6 +54,8 @@ export const interviewService = {
       'Resume Deep Dive'
     ];
 
+    const interviewMode = params.mode || 'text';
+
     // 1. Insert Interview row
     const { data: interviewRow, error: intError } = await supabase
       .from('interviews')
@@ -62,6 +67,8 @@ export const interviewService = {
         difficulty: params.difficulty,
         duration_minutes: params.durationMinutes,
         interview_style: params.interviewStyle || 'realistic',
+        mode: interviewMode,
+        voice_status: interviewMode === 'voice' ? 'connecting' : 'idle',
         focus_areas: defaultFocus,
         resume_id: params.resumeId || null,
         job_description_id: params.jobDescriptionId || null,
@@ -70,6 +77,7 @@ export const interviewService = {
         interview_plan: (params.interviewPlan as unknown as Json) || null,
         status: 'in_progress',
         current_question_index: 0,
+        remaining_time: params.durationMinutes * 60,
         processing_status: 'completed',
         processing_started_at: new Date().toISOString(),
         processing_completed_at: new Date().toISOString(),
@@ -131,6 +139,9 @@ export const interviewService = {
       id: interviewRow.id,
       createdAt: interviewRow.created_at,
       status: 'in_progress',
+      mode: (interviewRow.mode as InterviewMode) || 'text',
+      voiceStatus: (interviewRow.voice_status as VoiceStatus) || 'idle',
+      remainingTime: interviewRow.remaining_time || params.durationMinutes * 60,
       jobTitle: interviewRow.target_role,
       company: interviewRow.company,
       interviewType: interviewRow.interview_type as InterviewType,
@@ -145,6 +156,7 @@ export const interviewService = {
       jobDescriptionText: params.jobDescriptionText,
       questions: savedQuestions,
       currentQuestionIndex: 0,
+      currentQuestionId: savedQuestions[0]?.id || null,
       answers: {},
       feedbacks: {},
       finalReportId: `rep_${interviewRow.id}`,
@@ -172,9 +184,10 @@ export const interviewService = {
       return null;
     }
 
-    const sortedQuestions: Question[] = (data.questions || [])
+    const rawQuestions: any[] = Array.isArray(data.questions) ? data.questions : [];
+    const sortedQuestions: Question[] = rawQuestions
       .sort((a, b) => a.sequence_order - b.sequence_order)
-      .map((q) => ({
+      .map((q: any) => ({
         id: q.id,
         order: q.sequence_order,
         type: (q.question_type as Question['type']) || 'initial',
@@ -190,20 +203,23 @@ export const interviewService = {
         adaptiveFollowUpTriggers: (q.adaptive_follow_up_triggers as unknown as Question['adaptiveFollowUpTriggers']) || undefined,
       }));
 
+    const rawAnswers: any[] = Array.isArray(data.answers) ? data.answers : [];
     const answersMap: Record<string, CandidateAnswer> = {};
-    (data.answers || []).forEach((a) => {
+    rawAnswers.forEach((a: any) => {
       answersMap[a.question_id] = {
         questionId: a.question_id,
         answerText: a.answer_text,
         durationSeconds: a.duration_seconds,
-        inputMode: a.submission_type as 'text' | 'voice',
+        inputMode: (a.answer_type || a.submission_type) as 'text' | 'voice',
         submittedAt: a.created_at,
+        transcript: a.transcript || undefined,
       };
     });
 
+    const rawEvals: any[] = Array.isArray(data.evaluations) ? data.evaluations : [];
     const feedbacksMap: Record<string, QuestionFeedback> = {};
-    (data.evaluations || []).forEach((e) => {
-      const correspondingAnswer = (data.answers || []).find((a) => a.id === e.answer_id);
+    rawEvals.forEach((e: any) => {
+      const correspondingAnswer = rawAnswers.find((a) => a.id === e.answer_id);
       if (correspondingAnswer) {
         feedbacksMap[correspondingAnswer.question_id] = {
           questionId: correspondingAnswer.question_id,
@@ -221,7 +237,7 @@ export const interviewService = {
           tryThisNextTime: (e.try_this_next_time as unknown as QuestionFeedback['tryThisNextTime']) || {
             framework: 'STAR Framework',
             suggestion: e.improvement_suggestions?.[0] || 'Clarify baseline and outcome metrics.',
-            examplePhrasing: 'In my role, I identified...',
+            promptToImprove: 'Quantify baseline versus result in your next response.',
           },
         };
       }
@@ -232,6 +248,11 @@ export const interviewService = {
       createdAt: data.created_at,
       completedAt: data.completed_at || undefined,
       status: (data.status as InterviewSession['status']) || 'in_progress',
+      mode: (data.mode as InterviewMode) || 'text',
+      voiceProvider: data.voice_provider,
+      voiceSessionId: data.voice_session_id,
+      voiceStatus: (data.voice_status as VoiceStatus) || 'idle',
+      remainingTime: data.remaining_time || data.duration_minutes * 60,
       jobTitle: data.target_role,
       company: data.company,
       interviewType: data.interview_type as InterviewType,
@@ -246,6 +267,7 @@ export const interviewService = {
       jobDescriptionText: '',
       questions: sortedQuestions,
       currentQuestionIndex: data.current_question_index || 0,
+      currentQuestionId: sortedQuestions[data.current_question_index || 0]?.id || null,
       answers: answersMap,
       feedbacks: feedbacksMap,
       finalReportId: data.final_report ? `rep_${data.id}` : undefined,
@@ -261,7 +283,8 @@ export const interviewService = {
     questionId: string,
     answerText: string,
     inputMode: 'text' | 'voice',
-    durationSeconds: number
+    durationSeconds: number,
+    transcript?: string
   ): Promise<{ answerId: string }> {
     const { data, error } = await supabase
       .from('answers')
@@ -270,8 +293,10 @@ export const interviewService = {
         question_id: questionId,
         user_id: userId,
         answer_text: answerText,
+        answer_type: inputMode,
         submission_type: inputMode,
         duration_seconds: durationSeconds,
+        transcript: transcript || answerText,
       })
       .select('id')
       .single();
@@ -285,18 +310,65 @@ export const interviewService = {
   },
 
   /**
-   * Updates session progress in Supabase.
+   * Dynamically inserts an adaptive follow-up question into Supabase questions table.
+   */
+  async insertAdaptiveQuestion(
+    interviewId: string,
+    followUpQuestion: Question,
+    sequenceOrder: number
+  ): Promise<Question> {
+    const { data, error } = await supabase
+      .from('questions')
+      .insert({
+        interview_id: interviewId,
+        sequence_order: sequenceOrder,
+        category: followUpQuestion.category,
+        difficulty: 'intermediate',
+        question_type: 'follow_up',
+        question_text: followUpQuestion.text,
+        intent: followUpQuestion.intent || null,
+        context_explanation: followUpQuestion.contextExplanation || null,
+        recommended_duration_seconds: followUpQuestion.recommendedDurationSeconds || 120,
+        expected_signals: (followUpQuestion.expectedSignals as unknown as Json) || null,
+        red_flags: (followUpQuestion.redFlags as unknown as Json) || null,
+        evaluation_criteria: (followUpQuestion.evaluationCriteria as unknown as Json) || null,
+        is_follow_up: true,
+        parent_question_id: followUpQuestion.parentQuestionId || null,
+      })
+      .select()
+      .single();
+
+    if (error || !data) {
+      console.error('Error inserting adaptive question into Supabase:', error);
+      throw new Error(`Failed to insert adaptive question: ${error?.message}`);
+    }
+
+    return {
+      ...followUpQuestion,
+      id: data.id,
+      order: data.sequence_order,
+    };
+  },
+
+  /**
+   * Updates session progress and remaining time in Supabase.
    */
   async updateSessionProgress(
     userId: string,
     interviewId: string,
     currentIndex: number,
-    status?: InterviewSession['status']
+    status?: InterviewSession['status'],
+    remainingTime?: number,
+    mode?: InterviewMode,
+    voiceStatus?: VoiceStatus
   ): Promise<void> {
     const updates: import('../../types/database.types').Database['public']['Tables']['interviews']['Update'] = {
       current_question_index: currentIndex,
     };
     if (status) updates.status = status;
+    if (remainingTime !== undefined) updates.remaining_time = remainingTime;
+    if (mode) updates.mode = mode;
+    if (voiceStatus) updates.voice_status = voiceStatus;
 
     const { error } = await supabase
       .from('interviews')
@@ -361,4 +433,3 @@ export const interviewService = {
     return this.getSessionById(userId, data.id);
   },
 };
-

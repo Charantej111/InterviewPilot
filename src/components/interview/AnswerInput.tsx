@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Mic, ArrowRight, Keyboard, AlertCircle } from 'lucide-react';
 import { VoiceRecorder } from './VoiceRecorder';
 import { Button } from '../ui/Button';
+import { useInterview } from '../../context/InterviewContext';
 
 export interface AnswerInputProps {
   onSubmit: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => void;
@@ -12,13 +13,28 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
   onSubmit,
   isSubmitting = false,
 }) => {
-  const [inputMode, setInputMode] = useState<'voice' | 'text'>('text');
+  const {
+    activeSession,
+    voiceStatus,
+    engineState,
+    liveTranscript,
+    interviewerSpokenText,
+    isInterrupted,
+    startVoiceSession,
+    stopVoiceSession,
+    switchToTextMode,
+    triggerBargeIn,
+  } = useInterview();
+
+  const [inputMode, setInputMode] = useState<'voice' | 'text'>(
+    activeSession.mode === 'voice' ? 'voice' : 'text'
+  );
   const [textAnswer, setTextAnswer] = useState('');
-  const [voiceTranscript, setVoiceTranscript] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
+  const [voiceBuffer, setVoiceBuffer] = useState('');
   const [pasteBlocked, setPasteBlocked] = useState(false);
 
-  const currentContent = inputMode === 'text' ? textAnswer : voiceTranscript;
+  const currentVoiceContent = liveTranscript || voiceBuffer;
+  const currentContent = inputMode === 'text' ? textAnswer : currentVoiceContent;
   const charCount = currentContent.length;
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -27,27 +43,28 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
     setTimeout(() => setPasteBlocked(false), 3500);
   };
 
-  const handleToggleRecording = () => {
-    if (!isRecording) {
-      setIsRecording(true);
-      const simulated = "In my previous role, we identified a 42% friction drop-off. I interviewed 18 users and redesigned the verification architecture with auto-edge detection, reducing verification failure by 19% and increasing monthly activations by 12%.";
-      let idx = 0;
-      const interval = setInterval(() => {
-        if (idx < simulated.length) {
-          setVoiceTranscript(simulated.slice(0, idx + 8));
-          idx += 8;
-        } else {
-          clearInterval(interval);
-        }
-      }, 100);
+  const handleModeChange = (mode: 'text' | 'voice') => {
+    setInputMode(mode);
+    if (mode === 'voice') {
+      startVoiceSession();
     } else {
-      setIsRecording(false);
+      switchToTextMode();
+    }
+  };
+
+  const handleToggleRecording = () => {
+    if (voiceStatus === 'listening') {
+      stopVoiceSession();
+    } else {
+      startVoiceSession();
     }
   };
 
   const handleSubmit = () => {
     if (!currentContent.trim() || isSubmitting) return;
-    onSubmit(currentContent, inputMode, 90);
+    onSubmit(currentContent, inputMode, 60);
+    setTextAnswer('');
+    setVoiceBuffer('');
   };
 
   return (
@@ -57,7 +74,7 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
         <div className="inline-flex items-center p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/80">
           <button
             type="button"
-            onClick={() => setInputMode('text')}
+            onClick={() => handleModeChange('text')}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               inputMode === 'text'
                 ? 'bg-white text-zinc-950 dark:bg-zinc-900 dark:text-white shadow-xs'
@@ -70,7 +87,7 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
 
           <button
             type="button"
-            onClick={() => setInputMode('voice')}
+            onClick={() => handleModeChange('voice')}
             className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               inputMode === 'voice'
                 ? 'bg-white text-zinc-950 dark:bg-zinc-900 dark:text-white shadow-xs'
@@ -78,7 +95,7 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
             }`}
           >
             <Mic size={13} />
-            <span>Live Voice Mode</span>
+            <span>Conversational Voice Mode</span>
           </button>
         </div>
 
@@ -86,7 +103,7 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
         {pasteBlocked && (
           <span className="text-[11px] font-bold text-rose-500 flex items-center gap-1 animate-fadeIn">
             <AlertCircle size={12} />
-            Pasting is disabled for live simulation integrity
+            Pasting is disabled for simulation integrity
           </span>
         )}
       </div>
@@ -98,14 +115,14 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
             value={textAnswer}
             onChange={(e) => setTextAnswer(e.target.value)}
             onPaste={handlePaste}
-            placeholder="Type your structured answer here using the STAR framework (Situation, Task, Action, Result)..."
+            placeholder="Type your response here..."
             rows={5}
             className="w-full bg-transparent text-xs sm:text-sm text-foreground placeholder:text-zinc-400 resize-none focus:outline-none leading-relaxed"
           />
 
           <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-800 text-xs text-zinc-400">
-            <span className="text-[11px] font-medium hidden sm:inline text-foreground-muted">
-              State baseline metrics · Explain trade-offs · Clarify personal ownership
+            <span className="text-[11px] font-medium text-foreground-muted">
+              Press submit when finished answering
             </span>
 
             <div className="flex items-center gap-3 ml-auto">
@@ -124,13 +141,18 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
       ) : (
         <div className="space-y-4">
           <VoiceRecorder
-            isRecording={isRecording}
+            voiceStatus={voiceStatus}
+            engineState={engineState}
+            transcript={currentVoiceContent}
+            interviewerSpokenText={interviewerSpokenText}
+            isInterrupted={isInterrupted}
             onToggleRecording={handleToggleRecording}
-            onResetRecording={() => setVoiceTranscript('')}
-            transcript={voiceTranscript}
+            onResetRecording={() => setVoiceBuffer('')}
+            onInterrupt={triggerBargeIn}
+            onSwitchToTextMode={() => handleModeChange('text')}
           />
 
-          {voiceTranscript.trim().length > 0 && !isRecording && (
+          {currentVoiceContent.trim().length > 0 && voiceStatus !== 'listening' && (
             <div className="flex justify-end pt-2">
               <Button
                 size="lg"
@@ -139,7 +161,7 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
                 rightIcon={<ArrowRight size={16} />}
                 className="px-6 shadow-sm"
               >
-                Submit Verbal Response
+                Submit Spoken Answer
               </Button>
             </div>
           )}
