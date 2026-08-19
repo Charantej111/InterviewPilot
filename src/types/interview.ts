@@ -93,7 +93,27 @@ export interface AdaptiveFollowUpTrigger {
   followUpProbe: string;
 }
 
+export type ObjectiveType = 
+  | 'verify_strength' 
+  | 'probe_gap' 
+  | 'test_critical_competency' 
+  | 'explore_domain' 
+  | 'clarify_evidence';
+
+export interface InterviewObjective {
+  id: string;
+  order: number;
+  type: ObjectiveType;
+  targetCompetency: string;
+  focusRequirement?: string;
+  focusEvidenceSummary?: string;
+  reasoning: string;
+  lookForSignals: string[];
+  redFlagSignals: string[];
+}
+
 export interface Question {
+
   id: string;
   order: number;
   type: 'initial' | 'follow_up';

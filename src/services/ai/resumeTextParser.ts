@@ -36,7 +36,8 @@ export function parseResumeTextDeterministically(
     ? fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').replace(/\bresume\b/gi, '').replace(/\bcv\b/gi, '').trim()
     : 'Candidate';
 
-  const textLower = rawText.toLowerCase();
+
+
 
   // 1. Extract matching skills directly from candidate's text
   const extractedSkills: string[] = [];
@@ -146,3 +147,144 @@ export function parseResumeTextDeterministically(
     potentialGaps: [],
   };
 }
+
+/**
+ * Deterministically constructs a structured CandidateEvidenceModel directly from text
+ * when Gemini API returns 429 quota exhaustion or network drop.
+ */
+export function parseResumeEvidenceDeterministically(
+  fileName: string,
+  rawText: string
+): import('../../types/resume').CandidateEvidenceModel {
+  const profile = parseResumeTextDeterministically(fileName, rawText);
+  const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+
+  const techSkills = profile.skills.slice(0, 8).map((s) => ({
+    value: s,
+    sourceText: lines.find((l) => l.toLowerCase().includes(s.toLowerCase())) || s,
+    sourceLocation: { section: 'SKILLS' },
+    confidence: 'high' as const,
+  }));
+
+  const prodSkills = profile.skills.slice(8, 14).map((s) => ({
+    value: s,
+    sourceText: lines.find((l) => l.toLowerCase().includes(s.toLowerCase())) || s,
+    sourceLocation: { section: 'SKILLS' },
+    confidence: 'medium' as const,
+  }));
+
+  const workExperience = profile.experience.map((exp) => ({
+    company: {
+      value: exp.company,
+      sourceText: exp.role,
+      sourceLocation: { section: 'EXPERIENCE' },
+      confidence: 'medium' as const,
+    },
+    role: {
+      value: exp.role,
+      sourceText: exp.role,
+      sourceLocation: { section: 'EXPERIENCE' },
+      confidence: 'high' as const,
+    },
+    startDate: {
+      value: exp.duration.split('-')[0]?.trim() || 'Recent',
+      sourceText: exp.duration,
+      sourceLocation: { section: 'EXPERIENCE' },
+      confidence: 'medium' as const,
+    },
+    endDate: {
+      value: exp.duration.split('-')[1]?.trim() || 'Present',
+      sourceText: exp.duration,
+      sourceLocation: { section: 'EXPERIENCE' },
+      confidence: 'medium' as const,
+    },
+    bullets: exp.highlights.map((h) => ({
+      value: h,
+      sourceText: h,
+      sourceLocation: { section: 'EXPERIENCE' },
+      confidence: 'high' as const,
+    })),
+  }));
+
+  const projects = profile.projects.map((p) => ({
+    name: {
+      value: p.name,
+      sourceText: p.description,
+      sourceLocation: { section: 'PROJECTS' },
+      confidence: 'high' as const,
+    },
+    problem: {
+      value: p.description,
+      sourceText: p.description,
+      sourceLocation: { section: 'PROJECTS' },
+      confidence: 'medium' as const,
+    },
+    contribution: null,
+    technologies: (p.technologies || []).map((t) => ({
+
+      value: t,
+      sourceText: t,
+      sourceLocation: { section: 'PROJECTS' },
+      confidence: 'high' as const,
+    })),
+    outcomes: p.metrics ? [
+      {
+        value: p.metrics,
+        sourceText: p.description,
+        sourceLocation: { section: 'PROJECTS' },
+        confidence: 'high' as const,
+      }
+    ] : [],
+  }));
+
+  const education = profile.education.map((edu) => ({
+    degree: {
+      value: edu.degree,
+      sourceText: edu.degree,
+      sourceLocation: { section: 'EDUCATION' },
+      confidence: 'high' as const,
+    },
+    institution: {
+      value: edu.institution,
+      sourceText: edu.degree,
+      sourceLocation: { section: 'EDUCATION' },
+      confidence: 'medium' as const,
+    },
+    year: {
+      value: edu.year || 'Completed',
+      sourceText: edu.year || edu.degree,
+      sourceLocation: { section: 'EDUCATION' },
+      confidence: 'high' as const,
+    },
+  }));
+
+  return {
+    identity: {
+      name: {
+        value: profile.name,
+        sourceText: lines[0] || profile.name,
+        sourceLocation: { section: 'HEADER' },
+        confidence: 'high',
+      },
+      email: undefined,
+      role: {
+        value: profile.summary,
+        sourceText: lines[1] || profile.summary,
+        sourceLocation: { section: 'HEADER' },
+        confidence: 'medium',
+      },
+    },
+    education,
+    workExperience,
+    projects,
+    skills: {
+      technical: techSkills,
+      product: prodSkills,
+      domain: [],
+    },
+    certifications: [],
+    unclear: [],
+
+  };
+}
+

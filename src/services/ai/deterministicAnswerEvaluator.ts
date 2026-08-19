@@ -11,8 +11,9 @@ export interface DeterministicEvaluationInput {
 export function evaluateAnswerDeterministically(
   input: DeterministicEvaluationInput
 ): QuestionFeedback & { followUpNeeded: boolean; followUpTriggerReason?: string } {
-  const { question, answerText, role, company, difficulty = 'intermediate' } = input;
+  const { question, answerText, role, company, difficulty: _difficulty = 'intermediate' } = input;
   const cleanAnswer = (answerText || '').trim();
+
   const words = cleanAnswer.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
 

@@ -35,6 +35,7 @@ export const SetupPage: React.FC = () => {
     createInterviewFromDraft,
   } = useInterview();
 
+
   const [mode, setMode] = useState<'input' | 'ready'>('input');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState('Extracting resume & job signals...');
@@ -56,8 +57,10 @@ export const SetupPage: React.FC = () => {
       await uploadResumeFile(file);
       setLoadingSteps([
         { label: `Parsed ${file.name} deliverables`, status: 'completed' },
-        { label: 'Candidate profile extracted successfully', status: 'completed' },
+        { label: 'Candidate evidence extracted — review required', status: 'completed' },
       ]);
+      // Navigate to evidence review page — candidate must confirm before interview starts
+      navigate('/setup/resume-intelligence');
     } catch (err: any) {
       console.error('Upload error:', err);
       setErrorMessage(err.message || 'Failed to upload resume document.');
@@ -73,54 +76,83 @@ export const SetupPage: React.FC = () => {
       return;
     }
 
+    // Gate: candidate must have confirmed their profile before calibration
+    if (!setupDraft.lockedCandidateContext) {
+      if (setupDraft.candidateEvidenceModel) {
+        navigate('/setup/resume-intelligence');
+        return;
+      }
+      setErrorMessage('Please upload and confirm your resume first.');
+      return;
+    }
+
     setErrorMessage(null);
     setIsProcessing(true);
     
     setLoadingSteps([
       { label: `Deconstruct ${setupDraft.jobTitle} hiring bar`, status: 'in_progress' },
       { label: `Research ${setupDraft.company} context & verified facts`, status: 'pending' },
-      { label: 'Calculate fit & map actionable gaps', status: 'pending' },
-      { label: 'Synthesize tailored anchor interview questions', status: 'pending' },
+      { label: 'Calculate requirement-level fit & map gaps', status: 'pending' },
+      { label: 'Prepare interview objectives', status: 'pending' },
     ]);
 
     try {
-      // 1. Analyze JD
+      // 1. Analyze JD → JDEvidenceModel
       setProcessingStage(`Deconstructing ${setupDraft.jobTitle} requirements...`);
       const jdText = setupDraft.jobDescriptionText.trim() || `${setupDraft.jobTitle} at ${setupDraft.company}`;
-      const parsedJob = await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
+      await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Researching ${setupDraft.company} context & verified facts`, status: 'in_progress' },
-        { label: 'Calculate fit & map actionable gaps', status: 'pending' },
-        { label: 'Synthesize tailored anchor interview questions', status: 'pending' },
+        { label: 'Calculate requirement-level fit & map gaps', status: 'pending' },
+        { label: 'Prepare interview objectives', status: 'pending' },
       ]);
 
       // 2. Company Research
       setProcessingStage(`Gathering grounded ${setupDraft.company} intelligence...`);
-      const companyData = await researchCompanyContext(
-        setupDraft.company, 
-        setupDraft.jobTitle, 
-        parsedJob, 
-        setupDraft.candidateProfile
+      await researchCompanyContext(
+        setupDraft.company,
+        setupDraft.jobTitle
       );
 
+      // 3. Compute match using new engine if we have evidence models
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
-        { label: 'Calculated 45/30/25 fit & mapped actionable gaps', status: 'completed' },
-        { label: 'Synthesizing tailored anchor interview questions...', status: 'in_progress' },
+        { label: 'Calculating requirement-level fit...', status: 'in_progress' },
+        { label: 'Prepare interview objectives', status: 'pending' },
       ]);
 
-      // 3. Prepare tailored interview with fresh objects
-      setProcessingStage('Calibrating tailored interview questions & rubric...');
-      await prepareTailoredInterview(setupDraft.candidateProfile, parsedJob, companyData);
+      const jdEvidenceModel = setupDraft.jdEvidenceModel;
+      if (setupDraft.lockedCandidateContext && jdEvidenceModel) {
+        try {
+          const { computeMatchAssessment, buildLegacyMatchResult } = await import('../services/ai/matchEngine');
+          const assessment = computeMatchAssessment(setupDraft.lockedCandidateContext, jdEvidenceModel);
+          const legacyResult = buildLegacyMatchResult(assessment);
+          updateSetupDraft({ matchAnalysis: legacyResult });
+        } catch (matchErr) {
+          console.warn('Match engine failed, skipping match step:', matchErr);
+        }
+      }
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
-        { label: 'Calculated 45/30/25 fit & mapped actionable gaps', status: 'completed' },
-        { label: 'Tailored anchor interview questions ready', status: 'completed' },
+        { label: 'Requirement-level fit calculated', status: 'completed' },
+        { label: 'Preparing interview objectives...', status: 'in_progress' },
+      ]);
+
+      // 4. Prepare tailored interview
+      setProcessingStage('Calibrating tailored interview questions & rubric...');
+      await prepareTailoredInterview();
+
+
+      setLoadingSteps([
+        { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
+        { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
+        { label: 'Requirement-level fit calculated', status: 'completed' },
+        { label: 'Interview objectives ready', status: 'completed' },
       ]);
 
       setMode('ready');
@@ -131,6 +163,7 @@ export const SetupPage: React.FC = () => {
       setIsProcessing(false);
     }
   };
+
 
   // Launch Simulation
   const handleLaunchSimulation = async () => {

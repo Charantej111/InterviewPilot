@@ -11,6 +11,7 @@ import { SignupPage } from './pages/SignupPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SetupPage } from './pages/SetupPage';
+import { ResumeIntelligencePage } from './pages/ResumeIntelligencePage';
 import { InterviewPreviewPage } from './pages/InterviewPreviewPage';
 import { InterviewRoomPage } from './pages/InterviewRoomPage';
 import { QuestionFeedbackPage } from './pages/QuestionFeedbackPage';
@@ -50,6 +51,16 @@ export const App: React.FC = () => {
                 element={
                   <ProtectedRoute>
                     <SetupPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Resume Intelligence Review — confirm evidence before interview */}
+              <Route
+                path="/setup/resume-intelligence"
+                element={
+                  <ProtectedRoute>
+                    <ResumeIntelligencePage />
                   </ProtectedRoute>
                 }
               />

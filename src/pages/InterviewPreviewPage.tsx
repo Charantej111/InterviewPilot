@@ -4,18 +4,22 @@ import { useInterview } from '../context/InterviewContext';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { Folder } from '../components/reactbits/Folder';
 import { 
   Building2, 
   Sparkles, 
   ArrowRight,
   Mic,
-  Keyboard
+  Keyboard,
+  CheckCircle2,
+  Lock,
+  Compass,
+  Clock,
+  Radio
 } from 'lucide-react';
 import { InterviewMode } from '../types/interview';
 
 export const InterviewPreviewPage: React.FC = () => {
-  const { activeSession, startVoiceSession, switchToTextMode } = useInterview();
+  const { activeSession, setupDraft, startVoiceSession, switchToTextMode } = useInterview();
   const navigate = useNavigate();
 
   React.useEffect(() => {
@@ -38,120 +42,109 @@ export const InterviewPreviewPage: React.FC = () => {
     }
   };
 
+  const roleName = activeSession.jobTitle || setupDraft.jobTitle || 'Target Role';
+  const companyName = activeSession.company || setupDraft.company || 'Target Company';
+  const duration = activeSession.durationMinutes || setupDraft.durationMinutes || 20;
+
   return (
     <DashboardLayout>
-      <div className="max-w-3xl mx-auto py-4 space-y-8">
+      <div className="max-w-2xl mx-auto py-8 space-y-8">
         {/* Pre-flight Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Badge variant="accent" size="sm">Pre-Flight Briefing</Badge>
-              <span className="text-xs text-foreground-muted">Session ID: {activeSession.id}</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
-              Your Interview is Ready
-            </h1>
-            <p className="text-xs sm:text-sm text-foreground-muted leading-relaxed">
-              Review the focus dimensions and expectations below before entering the live room.
-            </p>
+        <div className="space-y-2 text-center sm:text-left">
+          <div className="flex items-center justify-center sm:justify-start gap-2">
+            <Badge variant="accent" size="sm" className="gap-1">
+              <Radio className="w-3 h-3 animate-pulse text-emerald-400" />
+              Dynamic Simulation Ready
+            </Badge>
           </div>
-
-          <div className="hidden sm:block">
-            <Folder
-              color="#5A55DF"
-              size={0.9}
-              items={[
-                <div key="1" className="p-1 text-[9px] font-bold text-foreground">Briefing</div>,
-                <div key="2" className="p-1 text-[9px] font-bold text-foreground">{activeSession.questions.length} Qs</div>,
-                <div key="3" className="p-1 text-[9px] font-bold text-foreground">Live AI</div>
-              ]}
-            />
-          </div>
+          <h1 className="text-3xl font-extrabold text-foreground tracking-tight">
+            Your interview is ready
+          </h1>
+          <p className="text-sm text-foreground-muted">
+            The interviewer has loaded your background and requirements. Questions will adapt in real time to your responses.
+          </p>
         </div>
 
-        {/* Blueprint Overview Box */}
+        {/* Opaque Briefing Card */}
         <div className="p-6 sm:p-8 rounded-2xl bg-surface border border-border shadow-subtle space-y-6">
+          {/* Target Role & Company */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border/80">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-primary">
                 Target Role
               </span>
               <h2 className="text-xl font-bold text-foreground mt-0.5">
-                {activeSession.jobTitle}
+                {roleName}
               </h2>
               <div className="flex items-center gap-2 text-xs text-foreground-muted mt-1">
                 <Building2 className="w-3.5 h-3.5" />
-                <span>{activeSession.company}</span>
+                <span>{companyName}</span>
                 <span>•</span>
-                <span className="capitalize">{activeSession.interviewType} Loop</span>
+                <span className="capitalize">{activeSession.interviewType || 'Realistic'} Simulation</span>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Badge variant="default" size="md" className="font-semibold">
-                {activeSession.difficulty.toUpperCase()}
-              </Badge>
-              <Badge variant="neutral" size="md">
-                {activeSession.questions.length} Questions
+              <Badge variant="default" size="md" className="font-semibold capitalize">
+                {activeSession.difficulty || 'Intermediate'}
               </Badge>
             </div>
           </div>
 
-          {/* Key Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
-              <span className="text-foreground-muted block">Duration</span>
-              <span className="font-semibold text-foreground font-mono">~{activeSession.durationMinutes} mins</span>
+          {/* Key Simulation Attributes */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60 flex items-center gap-2.5">
+              <Clock className="w-4 h-4 text-primary shrink-0" />
+              <div>
+                <span className="text-foreground-muted block text-[11px]">Time Window</span>
+                <span className="font-semibold text-foreground font-mono">{duration} minutes</span>
+              </div>
             </div>
-            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
-              <span className="text-foreground-muted block">Real-Time Voice</span>
-              <span className="font-semibold text-foreground">Gemini Live</span>
+            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60 flex items-center gap-2.5">
+              <Compass className="w-4 h-4 text-indigo-400 shrink-0" />
+              <div>
+                <span className="text-foreground-muted block text-[11px]">Question Order</span>
+                <span className="font-semibold text-foreground">Adaptive</span>
+              </div>
             </div>
-            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
-              <span className="text-foreground-muted block">Follow-ups</span>
-              <span className="font-semibold text-foreground">Adaptive</span>
-            </div>
-            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60">
-              <span className="text-foreground-muted block">Passing Bar</span>
-              <span className="font-semibold text-foreground font-mono">7.0 / 10</span>
+            <div className="p-3 rounded-xl bg-surface-subtle border border-border/60 flex items-center gap-2.5 col-span-2 sm:col-span-1">
+              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div>
+                <span className="text-foreground-muted block text-[11px]">Evaluation</span>
+                <span className="font-semibold text-foreground">Evidence-Based</span>
+              </div>
             </div>
           </div>
 
-          {/* AI Focus Narrative */}
-          <div className="p-4 rounded-xl bg-primary-subtle/40 border border-primary/20 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-primary">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Personalized Calibration Summary:</span>
-            </div>
-            <p className="text-xs text-foreground leading-relaxed">
-              Based on your resume and this {activeSession.jobTitle} role at {activeSession.company}, your interview will focus on:
-            </p>
-            <ul className="space-y-1.5 pt-1">
-              {activeSession.focusAreas.map((area, idx) => (
-                <li key={idx} className="text-xs text-foreground-muted flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                  <span>{area}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Examiner's Tips */}
-          <div className="p-4 rounded-xl bg-surface-subtle/60 border border-border/80 space-y-2 text-xs text-foreground-muted">
-            <span className="font-semibold text-foreground block">
-              Interview Best Practices:
+          {/* Grounding Pillars */}
+          <div className="p-4 rounded-xl bg-surface-subtle/70 border border-border/80 space-y-3">
+            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-primary" />
+              Interview Grounding & Context:
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-              <div>• Take 10 seconds to collect your thoughts before speaking.</div>
-              <div>• Use the STAR framework for behavioral responses.</div>
-              <div>• State your baseline numbers before experiment metrics.</div>
-              <div>• You can interrupt the AI at any time during Voice Mode.</div>
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2 text-foreground">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Your confirmed resume evidence & deliverable metrics (Locked)</span>
+              </div>
+              <div className="flex items-center gap-2 text-foreground">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Deconstructed job posting requirements & competency signals</span>
+              </div>
+              <div className="flex items-center gap-2 text-foreground">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Grounded {companyName} verified company context</span>
+              </div>
             </div>
           </div>
+
+          <p className="text-xs text-foreground-muted italic leading-relaxed text-center sm:text-left">
+            The interviewer will formulate dynamic questions and follow-ups based directly on what you answer.
+          </p>
         </div>
 
-        {/* Start CTA Buttons */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+        {/* Start CTAs */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
           <Button variant="secondary" onClick={() => navigate('/setup')}>
             Back to Setup
           </Button>

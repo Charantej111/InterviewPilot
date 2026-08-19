@@ -1,5 +1,12 @@
 import { supabase } from '../../lib/supabase';
 import { Json } from '../../types/database.types';
+import type {
+  DocumentClassification,
+  DocumentType,
+  DocumentQuality,
+  CandidateEvidenceModel,
+  CandidateProfile,
+} from '../../types/resume';
 
 export interface ResumeRecord {
   id: string;
@@ -61,14 +68,13 @@ export const resumeService = {
   },
 
   /**
-   * Converts file to Base64 data URL / raw base64 string for direct multimodal Gemini parsing.
+   * Converts file to Base64 data URL / raw base64 string.
    */
   async extractFileBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove data URL prefix (e.g. "data:application/pdf;base64,")
         const base64 = result.includes(',') ? result.split(',')[1] : result;
         resolve(base64);
       };
@@ -78,19 +84,264 @@ export const resumeService = {
   },
 
   /**
+   * Step 2 of extraction pipeline:
+   * Normalize raw extracted text — strip control characters, collapse whitespace.
+   */
+  normalizeText(rawText: string): string {
+    return rawText
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')  // strip control chars
+      .replace(/\r\n|\r/g, '\n')                             // normalize line endings
+      .replace(/[ \t]+/g, ' ')                               // collapse horizontal whitespace
+      .replace(/\n{3,}/g, '\n\n')                           // collapse excessive blank lines
+      .trim();
+  },
+
+  /**
+   * Step 3 of extraction pipeline:
+   * Detect common resume section headers and insert labels.
+   * Output: Gemini-ready text with [SECTION: X] markers.
+   */
+  detectSectionsAndLabel(normalizedText: string): string {
+    const sectionPatterns: [RegExp, string][] = [
+      [/^(work\s*experience|experience|employment|work\s*history)/im, 'EXPERIENCE'],
+      [/^(education|academic|qualifications)/im,                       'EDUCATION'],
+      [/^(projects?|personal\s*projects?|key\s*projects?)/im,         'PROJECTS'],
+      [/^(skills?|technical\s*skills?|core\s*competencies)/im,        'SKILLS'],
+      [/^(certifications?|certificates?|licenses?)/im,                 'CERTIFICATIONS'],
+      [/^(achievements?|awards?|honors?)/im,                           'ACHIEVEMENTS'],
+      [/^(summary|profile|objective|about)/im,                         'SUMMARY'],
+    ];
+
+    const lines = normalizedText.split('\n');
+    const labeled: string[] = [];
+    let currentSection = 'HEADER';
+    labeled.push(`[SECTION: ${currentSection}]`);
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) { labeled.push(''); continue; }
+
+      let matched = false;
+      for (const [pattern, sectionName] of sectionPatterns) {
+        if (pattern.test(trimmed) && trimmed.length < 60) {
+          currentSection = sectionName;
+          labeled.push(`\n[SECTION: ${sectionName}]`);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) labeled.push(trimmed);
+    }
+
+    return labeled.join('\n');
+  },
+
+  /**
+   * Step 4 of extraction pipeline:
+   * Deterministic document classification gate — no AI call.
+   * Returns DocumentClassification with canProceed flag.
+   */
+  classifyDocument(labeledText: string, rawTextLength: number): DocumentClassification {
+    const lower = labeledText.toLowerCase();
+    const sectionsDetected: string[] = [];
+
+    if (lower.includes('[section: experience]')) sectionsDetected.push('EXPERIENCE');
+    if (lower.includes('[section: education]'))  sectionsDetected.push('EDUCATION');
+    if (lower.includes('[section: projects]'))   sectionsDetected.push('PROJECTS');
+    if (lower.includes('[section: skills]'))     sectionsDetected.push('SKILLS');
+
+    // Quality gate
+    if (rawTextLength < 150) {
+      return {
+        documentType: 'unknown',
+        documentQuality: 'unreadable',
+        extractedTextLength: rawTextLength,
+        sectionsDetected,
+        canProceed: false,
+        rejectionReason: 'Too little text could be extracted from this document. It may be image-based or corrupted.',
+      };
+    }
+
+    // Academic document patterns
+    const academicPatterns = [
+      /semester|grade\s*card|marks\s*sheet|transcript|gpa|cgpa|subject\s*code|examination/i,
+      /roll\s*no|register\s*number|university\s*exam/i,
+    ];
+    const isAcademic = academicPatterns.some((p) => p.test(lower));
+    if (isAcademic && !sectionsDetected.includes('EXPERIENCE') && !sectionsDetected.includes('PROJECTS')) {
+      return {
+        documentType: 'academic_document',
+        documentQuality: 'good',
+        extractedTextLength: rawTextLength,
+        sectionsDetected,
+        canProceed: false,
+        rejectionReason: 'This appears to be an academic document (marks sheet or transcript), not a resume.',
+      };
+    }
+
+    // Certificate patterns
+    const certPatterns = [/this\s*is\s*to\s*certify|certificate\s*of\s*completion|awarded\s*to/i];
+    const isCert = certPatterns.some((p) => p.test(lower));
+    if (isCert && sectionsDetected.length === 0) {
+      return {
+        documentType: 'certificate',
+        documentQuality: 'good',
+        extractedTextLength: rawTextLength,
+        sectionsDetected,
+        canProceed: false,
+        rejectionReason: 'This appears to be a certificate, not a resume.',
+      };
+    }
+
+    // Document quality
+    const hasExperience = sectionsDetected.includes('EXPERIENCE');
+    const hasProjects   = sectionsDetected.includes('PROJECTS');
+    const hasSkills     = sectionsDetected.includes('SKILLS');
+
+    let documentQuality: DocumentQuality = 'poor';
+    if ((hasExperience || hasProjects) && hasSkills) documentQuality = 'good';
+    else if (hasExperience || hasProjects || hasSkills) documentQuality = 'partial';
+
+    const documentType: DocumentType = 'resume';
+
+    return {
+      documentType,
+      documentQuality,
+      extractedTextLength: rawTextLength,
+      sectionsDetected,
+      canProceed: true,
+      warningMessage: documentQuality === 'poor'
+        ? 'Resume content seems sparse. Consider uploading a more complete resume for better results.'
+        : undefined,
+    };
+  },
+
+  /**
+   * Derives a flat CandidateProfile from CandidateEvidenceModel.
+   * Used for backward compatibility with report rendering.
+   * Never an AI output — always deterministically derived from confirmed evidence.
+   */
+  deriveProfileFromEvidence(model: CandidateEvidenceModel): CandidateProfile {
+    if (!model) {
+      return {
+        name: 'Candidate',
+        summary: '',
+        education: [],
+        experience: [],
+        projects: [],
+        skills: [],
+        certifications: [],
+        achievements: [],
+        strengths: [],
+        potentialGaps: [],
+      };
+    }
+
+    const techSkills = (model.skills?.technical || []).map((s) => s?.value || String(s)).filter(Boolean);
+    const prodSkills = (model.skills?.product || []).map((s) => s?.value || String(s)).filter(Boolean);
+    const domainSkills = (model.skills?.domain || []).map((s) => s?.value || String(s)).filter(Boolean);
+    const allSkills = [...techSkills, ...prodSkills, ...domainSkills];
+
+    const candidateName = model.identity?.name?.value || 'Candidate';
+    const primaryRole = model.workExperience?.[0]?.role?.value;
+    const primaryCompany = model.workExperience?.[0]?.company?.value;
+    const summary = primaryRole && primaryCompany
+      ? `${primaryRole} at ${primaryCompany}`
+      : model.identity?.role?.value || '';
+
+    return {
+      name: candidateName,
+      summary,
+      education: (model.education || []).map((e) => ({
+        degree: e?.degree?.value || '',
+        institution: e?.institution?.value || '',
+        year: e?.year?.value || '',
+      })),
+      experience: (model.workExperience || []).map((w) => ({
+        role: w?.role?.value || '',
+        company: w?.company?.value || '',
+        duration: `${w?.startDate?.value || ''} – ${w?.endDate?.value || ''}`.replace(/^ – $/, ''),
+        highlights: (w?.bullets || []).map((b) => b?.value || String(b)).filter(Boolean),
+      })),
+      projects: (model.projects || []).map((p) => ({
+        name: p?.name?.value || 'Project',
+        description: p?.contribution?.value || p?.problem?.value || '',
+        technologies: (p?.technologies || []).map((t) => t?.value || String(t)).filter(Boolean),
+        metrics: p?.outcomes?.[0]?.value || '',
+      })),
+      skills: [...new Set(allSkills)],
+      certifications: (model.certifications || []).map((c) => c?.value || String(c)).filter(Boolean),
+      achievements: [],
+      strengths: prodSkills.slice(0, 5),
+      potentialGaps: (model.unclear || []).map((u) => u?.text || String(u)).filter(Boolean),
+    };
+  },
+
+
+  /**
    * Extracts readable text content from an uploaded resume file.
+   * Uses Mozilla PDF.js for 100% full-text extraction of multi-column, designer, and compressed PDFs.
    */
   async extractTextFromFile(file: File): Promise<string> {
-    try {
-      if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-        return await file.text();
+    // 1. Text or Markdown files
+    if (file.type.includes('text') || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
+      return await file.text();
+    }
+
+    // 2. PDF Files — Use PDF.js engine
+    if (file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf')) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        
+        // Dynamically load PDF.js from CDN if not already in window
+        const pdfjsLib = (window as any).pdfjsLib || await (async () => {
+          if (!(window as any).pdfjsLib) {
+            await new Promise<void>((resolve, reject) => {
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+              script.onload = () => {
+                if ((window as any).pdfjsLib) {
+                  (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc =
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                }
+                resolve();
+              };
+              script.onerror = () => reject(new Error('Failed to load PDF parser.'));
+              document.head.appendChild(script);
+            });
+          }
+          return (window as any).pdfjsLib;
+        })().catch(() => null);
+
+        if (pdfjsLib) {
+          const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+          const pdf = await loadingTask.promise;
+          let extractedPagesText = '';
+
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const pageStrings = textContent.items.map((item: any) => item.str || '');
+            extractedPagesText += `\n[PAGE ${pageNum}]\n` + pageStrings.join(' ');
+          }
+
+          const cleanExtracted = extractedPagesText.trim();
+          if (cleanExtracted.length > 50) {
+            return cleanExtracted;
+          }
+        }
+      } catch (pdfErr) {
+        console.warn('PDF.js engine extraction warning, trying raw stream decoder fallback:', pdfErr);
       }
+    }
+
+    // 3. Fallback: Raw byte stream decoder
+    try {
       const buffer = await file.arrayBuffer();
       const uint8 = new Uint8Array(buffer);
       const textDecoder = new TextDecoder('utf-8', { fatal: false });
       const rawString = textDecoder.decode(uint8);
 
-      // Extract text content from PDF text streams (Tj/TJ operators)
       const pdfTextMatches = rawString.match(/\(([^()]+)\)\s*T[jJ]/g);
       if (pdfTextMatches && pdfTextMatches.length > 5) {
         const extracted = pdfTextMatches
@@ -102,7 +353,6 @@ export const resumeService = {
         }
       }
 
-      // Fallback: filter clean printable text sequences
       const cleanChars = rawString.replace(/[^\x20-\x7E\t\n\r]/g, ' ');
       const words = cleanChars
         .split(/\s+/)
@@ -112,10 +362,11 @@ export const resumeService = {
       }
       return '';
     } catch (err) {
-      console.warn('Could not extract raw text from file, passing base64 inlineData to multimodal AI:', err);
+      console.warn('Fallback stream text decoder failed:', err);
       return '';
     }
   },
+
 
   /**
    * Uploads a resume to the private 'resumes' Supabase Storage bucket

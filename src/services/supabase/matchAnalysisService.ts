@@ -296,6 +296,20 @@ export const matchAnalysisService = {
     const allGaps = [...blockingGaps, ...gaps.filter((g) => !blockingGaps.some((bg) => bg.gapId === g.gapId))];
 
     return {
+      // Stub matchAssessment for backward compat with new MatchAnalysisResult type
+      matchAssessment: {
+        overallMatchPercent: finalTotalScore,
+        verdict: finalTotalScore >= 60 ? 'strong' : finalTotalScore >= 35 ? 'moderate' : finalTotalScore >= 15 ? 'low' : 'mismatched',
+        confidence: qualificationConfidence,
+        evidenceCoverage,
+        requirementMatches: [],
+        directMatches: [],
+        transferableMatches: [],
+        missingRequirements: [],
+        unprovenClaims: [],
+        contradictedClaims: [],
+        criticalGaps: blockingGaps.map((g) => g.requirement),
+      } as any,
       matchPercentage: finalTotalScore,
       rawMatchPercentage: rawScore,
       qualificationConfidence,

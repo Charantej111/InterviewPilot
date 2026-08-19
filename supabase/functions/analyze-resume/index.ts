@@ -8,82 +8,159 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { fileName, fileText, fileBase64, apiKey } = await req.json();
-    const rawContent = (fileText || '').trim();
+    const { fileName, normalizedText, apiKey } = await req.json();
 
-    const prompt = `
-First, validate whether the provided document is a valid candidate resume (CV, work history, professional bio).
-If it is NOT a resume (e.g. it is a train ticket, booking confirmation, invoice, receipt, generic article, or random document), set "isValidResume": false and explain in "invalidReason".
+    if (!normalizedText || normalizedText.trim().length < 100) {
+      return new Response(JSON.stringify({
+        error: 'UNREADABLE_DOCUMENT',
+        message: 'Insufficient text could be extracted from this document.',
+      }), { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
-If it IS a valid resume:
-Set "isValidResume": true, "invalidReason": null, and extract the candidate profile.
+    // ── Step 1: Classify the document ────────────────────────────────────────
+    const classificationPrompt = `
+You are a document classifier. Examine the text below and determine:
+1. documentType: Is it a "resume", "cv", "portfolio", "academic_document" (marks sheet, grade card, transcript), "certificate", or "unknown"?
+2. documentQuality: Is it "good" (has name + experience/projects + skills), "partial" (some sections missing), "poor" (minimal content), or "unreadable" (<150 chars)?
 
-CRITICAL EXTRACTION RULES:
-1. Extract true deliverables, exact project names, metrics, tools, and skills evidenced directly in the resume.
-2. DO NOT fabricate credentials, previous employers, degrees, or metrics.
-3. If the candidate name is not explicitly mentioned, derive a professional identifier from the file name.
-4. Extract distinct projects with their full descriptions, technologies used, and any quantified metrics.
-5. Extract explicit work experience highlights, roles, and dates.
-
-Return JSON strictly matching this schema:
+Return ONLY valid JSON:
 {
-  "isValidResume": boolean,
-  "invalidReason": string | null,
-  "name": string,
-  "summary": string,
+  "documentType": string,
+  "documentQuality": string,
+  "sectionsDetected": string[],
+  "rejectionReason": string | null
+}
+
+DOCUMENT TEXT:
+${normalizedText.slice(0, 2000)}
+`;
+
+    const classificationResult = await callGeminiStructured(
+      classificationPrompt,
+      'You are a strict document classifier.',
+      { apiKey }
+    );
+
+    const docType = classificationResult.documentType || 'unknown';
+    const docQuality = classificationResult.documentQuality || 'poor';
+
+    if (!['resume', 'cv'].includes(docType)) {
+      return new Response(JSON.stringify({
+        error: 'INVALID_DOCUMENT_TYPE',
+        documentType: docType,
+        documentQuality: docQuality,
+        message: classificationResult.rejectionReason || `This appears to be a ${docType}, not a resume.`,
+        canProceed: false,
+      }), { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    if (docQuality === 'unreadable') {
+      return new Response(JSON.stringify({
+        error: 'UNREADABLE_DOCUMENT',
+        documentType: docType,
+        documentQuality: docQuality,
+        message: 'The document quality is too low to extract reliable information.',
+        canProceed: false,
+      }), { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── Step 2: Extract CandidateEvidenceModel ────────────────────────────────
+    const extractionPrompt = `
+You are a precise resume evidence extractor. Your job is to extract structured evidence from the resume text below.
+
+CRITICAL RULES:
+1. For EVERY extracted item, include the EXACT phrase or sentence from the resume as "sourceText".
+2. Do NOT invent, infer, or embellish anything that isn't directly stated.
+3. If a field is not found, use null — never guess.
+4. Confidence levels:
+   - "high"     = exact phrase found, unambiguous meaning
+   - "medium"   = source found but interpretation required
+   - "low"      = weak or ambiguous source
+   - "inferred" = AI inference — no direct statement
+
+Return ONLY valid JSON matching this exact schema:
+{
+  "identity": {
+    "name": { "value": string, "sourceText": string, "sourceLocation": { "section": string }, "confidence": string },
+    "email": { "value": string, "sourceText": string, "sourceLocation": { "section": string }, "confidence": string } | null,
+    "role": { "value": string, "sourceText": string, "sourceLocation": { "section": string }, "confidence": string } | null
+  },
   "education": [
     {
-      "degree": string,
-      "institution": string,
-      "year": string
+      "degree": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": string },
+      "institution": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": string },
+      "year": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": string }
     }
   ],
-  "experience": [
+  "workExperience": [
     {
-      "role": string,
-      "company": string,
-      "duration": string,
-      "highlights": string[]
+      "company": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": string },
+      "role": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": string },
+      "startDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": string },
+      "endDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": string },
+      "bullets": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": string }
+      ]
     }
   ],
   "projects": [
     {
-      "name": string,
-      "description": string,
-      "technologies": string[],
-      "metrics": string
+      "name": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": string },
+      "problem": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": string } | null,
+      "contribution": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": string } | null,
+      "technologies": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": string }
+      ],
+      "outcomes": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": string }
+      ]
     }
   ],
-  "skills": string[],
-  "certifications": string[],
-  "achievements": string[],
-  "strengths": string[],
-  "potentialGaps": string[]
+  "skills": {
+    "technical": [ { "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": string } ],
+    "product":   [ { "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": string } ],
+    "domain":    [ { "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": string } ]
+  },
+  "certifications": [
+    { "value": string, "sourceText": string, "sourceLocation": { "section": "CERTIFICATIONS" }, "confidence": string }
+  ],
+  "unclear": [
+    { "text": string, "reason": string }
+  ]
 }
+
+RESUME TEXT:
+${normalizedText}
 `;
 
-    const config: any = { apiKey };
-    if (fileBase64) {
-      const lowerName = (fileName || '').toLowerCase();
-      let mimeType = 'application/pdf';
-      if (lowerName.endsWith('.doc')) mimeType = 'application/msword';
-      else if (lowerName.endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-
-      config.inlineData = {
-        mimeType,
-        data: fileBase64,
-      };
-    }
-
-    const candidateProfile = await callGeminiStructured(
-      prompt,
-      'You are an executive talent assessor and hiring committee chairperson. Extract exact candidate deliverables without hallucinating experience.',
-      config
+    const evidenceModel = await callGeminiStructured(
+      extractionPrompt,
+      'You are a precise resume evidence extractor. Every claim must be backed by exact source text.',
+      { apiKey }
     );
 
-    return new Response(JSON.stringify({ candidateProfile }), {
+    // ── Step 3: Validate output has required structure ────────────────────────
+    if (!evidenceModel?.identity?.name?.value || !evidenceModel?.identity?.name?.sourceText) {
+      return new Response(JSON.stringify({
+        error: 'EXTRACTION_FAILED',
+        message: 'Could not reliably extract candidate identity from this document.',
+        canProceed: false,
+      }), { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    return new Response(JSON.stringify({
+      candidateEvidenceModel: evidenceModel,
+      documentClassification: {
+        documentType: docType,
+        documentQuality: docQuality,
+        sectionsDetected: classificationResult.sectionsDetected || [],
+        extractedTextLength: normalizedText.length,
+        canProceed: true,
+      },
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+
   } catch (error: any) {
     console.error('Error in analyze-resume Edge Function:', error);
     return new Response(JSON.stringify({ error: error.message }), {
@@ -92,3 +169,4 @@ Return JSON strictly matching this schema:
     });
   }
 });
+

@@ -14,8 +14,8 @@ import {
   ConversationTurn,
   InterviewConversationState,
 } from '../types/interview';
-import { CandidateProfile } from '../types/resume';
-import { JobProfile } from '../types/jobDescription';
+import { CandidateProfile, CandidateEvidenceModel, LockedCandidateContext } from '../types/resume';
+import { JobProfile, JDEvidenceModel } from '../types/jobDescription';
 import { CompanyResearchData } from '../types/companyResearch';
 import { MatchAnalysisResult, GapPriority } from '../types/matchAnalysis';
 import { createEmptySession } from '../data/defaults';
@@ -27,7 +27,9 @@ import { companyResearchService } from '../services/supabase/companyResearchServ
 import { aiService } from '../services/supabase/aiService';
 import { evaluationService } from '../services/supabase/evaluationService';
 import { voiceManager } from '../services/voice/voiceManager';
+import { interviewBrain } from '../services/ai/interviewBrain';
 import { storage } from '../lib/storage';
+
 
 export interface SetupDraft {
   resumeId?: string;
@@ -35,11 +37,15 @@ export interface SetupDraft {
   resumeFileSize: string;
   resumeParsed: boolean;
   candidateProfile: CandidateProfile | null;
+  // Evidence pipeline (new — supercedes candidateProfile as source of truth)
+  candidateEvidenceModel: CandidateEvidenceModel | null;
+  lockedCandidateContext: LockedCandidateContext | null;
   jobDescriptionId?: string;
   jobTitle: string;
   company: string;
   jobDescriptionText: string;
   jobProfile: JobProfile | null;
+  jdEvidenceModel: JDEvidenceModel | null;
   companyResearchId?: string;
   companyResearch: CompanyResearchData | null;
   matchAnalysis: MatchAnalysisResult | null;
@@ -57,6 +63,7 @@ interface InterviewContextType {
   updateSetupDraft: (updates: Partial<SetupDraft>) => void;
   resetSetupDraft: () => void;
   uploadResumeFile: (file: File) => Promise<{ resumeId: string; fileName: string; fileSize: string; profile: CandidateProfile }>;
+  confirmCandidateProfile: (confirmedModel: CandidateEvidenceModel) => Promise<void>;
   analyzeJobDescription: (title: string, company: string, rawText: string) => Promise<JobProfile>;
   researchCompanyContext: (companyName: string, role: string) => Promise<CompanyResearchData>;
   updateGapPriority: (gapId: string, priority: GapPriority) => void;
@@ -101,10 +108,13 @@ const defaultSetupDraft: SetupDraft = {
   resumeFileSize: '',
   resumeParsed: false,
   candidateProfile: null,
+  candidateEvidenceModel: null,
+  lockedCandidateContext: null,
   jobTitle: '',
   company: '',
   jobDescriptionText: '',
   jobProfile: null,
+  jdEvidenceModel: null,
   companyResearch: null,
   matchAnalysis: null,
   interviewType: 'mixed',
@@ -195,34 +205,60 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
 
-    const fileText = await resumeService.extractTextFromFile(file);
-    let fileBase64: string | undefined;
-    try {
-      fileBase64 = await resumeService.extractFileBase64(file);
-    } catch (_) {}
+    // Run the new evidence pipeline (normalize → section detect → classify gate → Gemini)
+    // Stores evidence model in draft so ResumeIntelligencePage can display it.
+    // lockedCandidateContext is NOT set here — it's set in confirmCandidateProfile().
+    const { evidenceModel } = await aiService.extractResumeEvidence(file);
+    const derivedProfile = resumeService.deriveProfileFromEvidence(evidenceModel);
 
-    const profile = await aiService.extractResumeProfile(file.name, fileText, fileBase64);
 
     updateSetupDraft({
       resumeId: record.id,
       resumeName: record.fileName || file.name,
       resumeFileSize: record.fileSizeFormatted,
       resumeParsed: true,
-      candidateProfile: profile,
-      matchAnalysis: null, // Invalidate stale cached match analysis
-      tailoredQuestions: [], // Invalidate stale cached questions
+      candidateProfile: derivedProfile,
+      candidateEvidenceModel: evidenceModel,
+      lockedCandidateContext: null,   // not locked until candidate confirms
+      matchAnalysis: null,
+      tailoredQuestions: [],
     });
 
     return {
       resumeId: record.id,
       fileName: record.fileName || file.name,
       fileSize: record.fileSizeFormatted,
-      profile,
+      profile: derivedProfile,
     };
+  };
+
+  /**
+   * Called when candidate presses "Confirm Profile & Continue" on ResumeIntelligencePage.
+   * Creates an immutable LockedCandidateContext snapshot.
+   * AI cannot add claims not present in this snapshot.
+   */
+  const confirmCandidateProfile = async (confirmedModel: CandidateEvidenceModel): Promise<void> => {
+    const derivedProfile = resumeService.deriveProfileFromEvidence(confirmedModel);
+    const locked: LockedCandidateContext = {
+      sessionId: setupDraft.resumeId || `ses_${Date.now()}`,
+      lockedAt: new Date().toISOString(),
+      evidenceModel: confirmedModel,
+      derivedProfile,
+    };
+    updateSetupDraft({
+      candidateEvidenceModel: confirmedModel,
+      candidateProfile: derivedProfile,
+      lockedCandidateContext: locked,
+      matchAnalysis: null,       // invalidate stale match
+      tailoredQuestions: [],
+    });
   };
 
   const analyzeJobDescription = async (title: string, company: string, rawText: string): Promise<JobProfile> => {
     const parsedJob = await aiService.analyzeJobDescription(title, company, rawText);
+    // Extract evidence model piggybacked on result (if edge function returned it)
+    const evidenceModel = (parsedJob as any).__jdEvidenceModel ?? null;
+    if ((parsedJob as any).__jdEvidenceModel) delete (parsedJob as any).__jdEvidenceModel;
 
     let savedId = setupDraft.jobDescriptionId;
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
@@ -246,12 +282,14 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       jobDescriptionText: rawText,
       jobDescriptionId: savedId,
       jobProfile: parsedJob,
-      matchAnalysis: null, // Invalidate stale cached match analysis
+      jdEvidenceModel: evidenceModel,
+      matchAnalysis: null,
       tailoredQuestions: [],
     });
 
     return parsedJob;
   };
+
 
   const researchCompanyContext = async (
     companyName: string, 
@@ -322,20 +360,43 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Always compute fresh match analysis for current candidate + job
     const match = await aiService.computeMatchAnalysis(candidate, job, company);
 
-    const questions = await aiService.prepareInterview({
-      resume: candidate,
-      job,
-      company,
-      match,
-      settings: {
+    let questions: Question[] = [];
+
+    // If candidate evidence is locked, formulate the intelligent dynamic opening question via Brain
+    if (setupDraft.lockedCandidateContext) {
+      const firstObjective = interviewBrain.selectFirstObjective(
+        setupDraft.lockedCandidateContext,
+        setupDraft.jdEvidenceModel,
+        setupDraft.matchAnalysis?.matchAssessment || match?.matchAssessment,
+        setupDraft.jobTitle || job.role
+      );
+
+      const openingQ = await aiService.generateOpeningQuestion({
+        objective: firstObjective,
+        lockedContext: setupDraft.lockedCandidateContext,
         role: setupDraft.jobTitle || job.role,
-        company: setupDraft.company || job.company,
-        difficulty: setupDraft.difficulty,
-        duration: setupDraft.durationMinutes,
-        focusAreas: setupDraft.focusAreas,
+        companyName: setupDraft.company || job.company,
         style: setupDraft.interviewStyle,
-      },
-    });
+        difficulty: setupDraft.difficulty,
+      });
+
+      questions = [openingQ];
+    } else {
+      questions = await aiService.prepareInterview({
+        resume: candidate,
+        job,
+        company,
+        match,
+        settings: {
+          role: setupDraft.jobTitle || job.role,
+          company: setupDraft.company || job.company,
+          difficulty: setupDraft.difficulty,
+          duration: setupDraft.durationMinutes,
+          focusAreas: setupDraft.focusAreas,
+          style: setupDraft.interviewStyle,
+        },
+      });
+    }
 
     updateSetupDraft({
       candidateProfile: candidate,
@@ -347,6 +408,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     return questions;
   };
+
 
   const startTimer = () => setIsTimerRunning(true);
   const pauseTimer = () => setIsTimerRunning(false);
@@ -735,8 +797,83 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setIsPreparingNextQuestion(true);
     try {
       const nextIndex = activeSession.currentQuestionIndex + 1;
-      
-      if (nextIndex < activeSession.questions.length && remainingSeconds > 60) {
+      const currentQ = activeSession.questions[activeSession.currentQuestionIndex];
+      const lastFeedback = (latestFeedback || (currentQ?.id ? activeSession.feedbacks[currentQ.id] : null)) as QuestionFeedback;
+      const candidateLastAnswer = currentQ?.id ? activeSession.answers[currentQ.id]?.answerText || '' : '';
+
+      const hasEnoughTime = remainingSeconds > 60;
+      const maxQuestionsReached = nextIndex >= 8;
+
+      if (hasEnoughTime && !maxQuestionsReached && setupDraft.lockedCandidateContext && currentQ) {
+        // Dynamic adaptive question generation via Brain
+        const prevObj = {
+          id: `obj_${nextIndex}`,
+          order: nextIndex,
+          type: 'test_critical_competency' as const,
+          targetCompetency: currentQ.targetCompetency || currentQ.category || 'Domain Competency',
+          focusRequirement: currentQ.sourceReference,
+          reasoning: currentQ.intent || '',
+          lookForSignals: currentQ.expectedSignals || [],
+          redFlagSignals: currentQ.redFlags || [],
+        };
+
+        const { nextObjective, isFollowUp } = interviewBrain.selectNextObjective(
+          prevObj,
+          lastFeedback || { shouldFollowUp: false },
+          setupDraft.lockedCandidateContext,
+          setupDraft.jdEvidenceModel,
+          setupDraft.matchAnalysis?.matchAssessment
+        );
+
+        const dynamicNextQ = await aiService.generateAdaptiveQuestion({
+          objective: nextObjective,
+          previousQuestionText: currentQ.text,
+          candidateAnswerText: candidateLastAnswer,
+          role: activeSession.jobTitle,
+          companyName: activeSession.company,
+          isFollowUp,
+          style: activeSession.interviewStyle,
+        });
+
+        const updatedQuestions = [...activeSession.questions, dynamicNextQ];
+        const updatedSession = {
+          ...activeSession,
+          questions: updatedQuestions,
+          currentQuestionIndex: nextIndex,
+          currentQuestionId: dynamicNextQ.id,
+        };
+
+        setActiveSession(updatedSession);
+        storage.set('current_session', updatedSession);
+        setLiveTranscript('');
+
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
+        }
+
+        // Voice Mode: Speak the next question aloud
+        if (activeSession.mode === 'voice') {
+          const provider = voiceManager.getVoiceProvider();
+          setEngineState('asking');
+          const bridgeRemark = await aiService.generateInterviewerRemark({
+            action: isFollowUp ? 'ask_question' : 'transition',
+            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            style: activeSession.interviewStyle,
+            question: dynamicNextQ,
+            conversationSummary: conversationStateRef.current.conversationSummary,
+          });
+
+          setInterviewerSpokenText(bridgeRemark);
+          await provider.speak(bridgeRemark);
+          await provider.startListening();
+          setEngineState('listening');
+        }
+
+        return true;
+      } else if (nextIndex < activeSession.questions.length && hasEnoughTime) {
+        // Pre-calibrated batch fallback
         const nextQ = activeSession.questions[nextIndex];
         const updatedSession = {
           ...activeSession,
@@ -751,7 +888,6 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
         }
 
-        // Voice Mode: Speak the next question aloud
         if (activeSession.mode === 'voice') {
           const provider = voiceManager.getVoiceProvider();
           setEngineState('asking');
@@ -808,6 +944,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsPreparingNextQuestion(false);
     }
   };
+
 
   const getReport = async (sessionId?: string): Promise<FinalReport> => {
     const targetSessionId = sessionId || activeSession.id;
@@ -867,6 +1004,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         updateSetupDraft,
         resetSetupDraft,
         uploadResumeFile,
+        confirmCandidateProfile,
         analyzeJobDescription,
         researchCompanyContext,
         updateGapPriority,

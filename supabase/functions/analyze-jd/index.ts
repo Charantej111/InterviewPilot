@@ -14,38 +14,112 @@ serve(async (req: Request) => {
     const cleanText = (rawText || '').trim();
 
     const prompt = `
-Deconstruct the following job description into structured hiring bar requirements for "${cleanTitle}" at "${cleanCompany}".
+You are a senior hiring committee architect. Deconstruct the following job description into a structured evidence model.
+
+Role: ${cleanTitle}
+Company: ${cleanCompany}
 
 Job Description:
 ${cleanText}
 
-Instructions:
-1. Extract the core responsibilities that define day-to-day execution.
-2. Separate REQUIRED non-negotiable skills from PREFERRED bonus qualifications.
-3. Formulate the precise technical/leadership competencies and key interview evaluation signals.
-4. Extract relevant domain keywords.
+CRITICAL RULES:
+1. For EVERY requirement, include the EXACT phrase or sentence from the JD as "sourceText".
+2. Classify each requirement's strength:
+   - "explicit"  = directly stated as mandatory ("must have", "required", "experience in X")
+   - "preferred" = stated as optional ("nice to have", "preferred", "bonus")
+   - "inferred"  = implied by context, not directly stated
+3. Map each requirement to a competencySignal (e.g. "analytics", "product_sense", "execution", "stakeholder_management", "technical_depth", "domain_knowledge").
+4. criticalCompetencies should be ordered by importance (most critical first).
 
-Return JSON strictly matching this schema:
+Return ONLY valid JSON matching this exact schema:
 {
   "role": "${cleanTitle}",
   "company": "${cleanCompany}",
-  "responsibilities": string[],
-  "requiredSkills": string[],
-  "preferredSkills": string[],
-  "experienceRequirements": string,
-  "competencies": string[],
-  "keywords": string[],
-  "interviewSignals": string[]
+  "seniority": "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",
+  "requiredSkills": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "explicit" | "preferred" | "inferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "preferredSkills": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "preferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "responsibilities": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "explicit" | "inferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "criticalCompetencies": string[],
+  "behavioralSignals": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "explicit" | "inferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "technicalRequirements": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "explicit" | "preferred" | "inferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "domainKnowledge": [
+    {
+      "requirement": string,
+      "sourceText": string,
+      "strength": "explicit" | "preferred" | "inferred",
+      "competencySignal": string,
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "hiringSignals": string[]
 }
 `;
 
-    const jobProfile = await callGeminiStructured(
+    const jdEvidenceModel = await callGeminiStructured(
       prompt,
-      'You are a senior hiring committee architect. Deconstruct job postings into precise technical competencies, hiring bar signals, and execution metrics.',
+      'You are a senior hiring committee architect. Every requirement must include sourceText from the JD.',
       { apiKey }
     );
 
-    return new Response(JSON.stringify({ jobProfile }), {
+    // Validate minimum structure
+    if (!jdEvidenceModel?.role || !jdEvidenceModel?.criticalCompetencies) {
+      throw new Error('JD extraction returned incomplete evidence model.');
+    }
+
+    // Also derive backward-compat jobProfile for legacy components
+    const jobProfile = {
+      role: jdEvidenceModel.role,
+      company: jdEvidenceModel.company || cleanCompany,
+      responsibilities: (jdEvidenceModel.responsibilities || []).map((r: any) => r.requirement),
+      requiredSkills: (jdEvidenceModel.requiredSkills || []).map((r: any) => r.requirement),
+      preferredSkills: (jdEvidenceModel.preferredSkills || []).map((r: any) => r.requirement),
+      experienceRequirements: jdEvidenceModel.seniority || 'Not specified',
+      competencies: jdEvidenceModel.criticalCompetencies || [],
+      keywords: (jdEvidenceModel.domainKnowledge || []).map((r: any) => r.requirement),
+      interviewSignals: jdEvidenceModel.hiringSignals || [],
+    };
+
+    return new Response(JSON.stringify({ jdEvidenceModel, jobProfile }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
@@ -56,3 +130,4 @@ Return JSON strictly matching this schema:
     });
   }
 });
+

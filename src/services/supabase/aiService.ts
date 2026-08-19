@@ -1,11 +1,15 @@
 import { supabase } from '../../lib/supabase';
-import { CandidateProfile } from '../../types/resume';
+import { CandidateProfile, CandidateEvidenceModel, DocumentClassification, LockedCandidateContext } from '../../types/resume';
 import { JobProfile } from '../../types/jobDescription';
 import { CompanyResearchData } from '../../types/companyResearch';
 import { MatchAnalysisResult } from '../../types/matchAnalysis';
-import { Question, QuestionFeedback, FinalReport } from '../../types/interview';
+import { Question, QuestionFeedback, FinalReport, InterviewObjective } from '../../types/interview';
 import { callClientGeminiStructured, callClientGeminiText } from '../ai/clientGemini';
 import { calculateReadinessPercentage } from '../ai/scoringRubric';
+import { resumeService } from './resumeService';
+
+
+
 
 const getClientApiKey = (): string | undefined => {
   return (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY || undefined;
@@ -24,9 +28,213 @@ async function getEdgeErrorMessage(error: any): Promise<string> {
 
 export const aiService = {
   /**
-   * Step 2: Resume Analyzer
-   * Extracts structured CandidateProfile from an uploaded resume via analyze-resume Edge Function with Client Gemini fallback and base64 support.
+   * PRIMARY ENTRY POINT — Full Resume Evidence Pipeline
+   *
+   * Pipeline:
+   *   File → extractTextFromFile → normalizeText → detectSectionsAndLabel
+   *   → classifyDocument (gate, no AI) → analyze-resume Edge Function
+   *   → CandidateEvidenceModel with sourceText per item
+   *
+   * Throws with a user-facing message if:
+   *   - Document is not a resume/cv
+   *   - Document is unreadable
+   *   - Extraction fails validation
    */
+  async extractResumeEvidence(
+    file: File,
+    apiKey?: string
+  ): Promise<{ evidenceModel: CandidateEvidenceModel; classification: DocumentClassification }> {
+    const key = apiKey || getClientApiKey();
+
+    // Step 1: Extract full text via PDF.js engine + extract base64 for fallback
+    const rawText = await resumeService.extractTextFromFile(file);
+    let fileBase64: string | undefined;
+    try {
+      fileBase64 = await resumeService.extractFileBase64(file);
+    } catch (_) {}
+
+    // Step 2: Normalize
+    const normalizedText = resumeService.normalizeText(rawText);
+
+    // Step 3: Detect sections + label
+    const labeledText = resumeService.detectSectionsAndLabel(normalizedText);
+
+    // Step 4: Deterministic classification gate
+    // If text is short (< 80 chars) but we have a valid PDF base64, allow multimodal Gemini to process it
+    const classification = resumeService.classifyDocument(labeledText, Math.max(normalizedText.length, fileBase64 ? 200 : 0));
+
+    if (!classification.canProceed && !fileBase64) {
+      throw Object.assign(
+        new Error(classification.rejectionReason || 'This document cannot be used for an interview.'),
+        { classification, code: 'DOCUMENT_REJECTED' }
+      );
+    }
+
+    // Step 5: Send labeled text + base64 to Edge Function
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-resume', {
+        body: { fileName: file.name, normalizedText: labeledText, fileBase64, apiKey: key },
+      });
+
+      if (error) {
+        const errMsg = await getEdgeErrorMessage(error);
+        throw new Error(errMsg);
+      }
+
+      if (data?.error) {
+        throw Object.assign(
+          new Error(data.message || data.error),
+          { classification: data, code: data.error }
+        );
+      }
+
+      if (!data?.candidateEvidenceModel) {
+        throw new Error('Resume extraction returned no evidence model.');
+      }
+
+      return {
+        evidenceModel: data.candidateEvidenceModel as CandidateEvidenceModel,
+        classification: data.documentClassification ?? classification,
+      };
+    } catch (edgeErr: any) {
+      if (edgeErr?.code === 'DOCUMENT_REJECTED' || edgeErr?.code === 'INVALID_DOCUMENT_TYPE') {
+        throw edgeErr;
+      }
+      // Cascade: try client-side Gemini with labeled text + base64 inlineData
+      console.warn('Edge function failed, cascading to client Gemini for evidence extraction:', edgeErr?.message);
+      return this.extractResumeEvidenceClient(file.name, labeledText, key, fileBase64, file.type || 'application/pdf');
+    }
+  },
+
+  /**
+   * Client-side Gemini fallback for evidence extraction.
+   * Supports text + base64 multimodal input for graphic/designer resumes.
+   */
+  async extractResumeEvidenceClient(
+    fileName: string,
+    labeledText: string,
+    apiKey?: string,
+    fileBase64?: string,
+    mimeType = 'application/pdf'
+  ): Promise<{ evidenceModel: CandidateEvidenceModel; classification: DocumentClassification }> {
+    try {
+      const prompt = `
+You are an expert resume analyzer. Extract ALL structured evidence from the candidate's resume (text and/or attached document).
+Extract everything: Contact Info, Work Experience, Projects/Portfolios, Technical/Design/Operational Skills, and Education.
+
+CRITICAL INSTRUCTIONS:
+1. For EVERY item, include the EXACT phrase from the resume as "sourceText".
+2. SKILLS: Extract all technical skills, domain skills (e.g. Design: Figma, UI/UX, Typography, Prototyping; BPO: Customer Support, CRM, SLA, Voice/Non-Voice, Inbound/Outbound, Chat Support; Operations, Software, etc.).
+3. WORK EXPERIENCE: Extract all roles, companies, dates, and bullet achievements.
+4. PROJECTS: Extract design case studies, client campaigns, technical projects, or initiatives.
+5. EDUCATION: Extract degrees, institutions, and completion years.
+6. Confidence: "high" = explicit phrase, "medium" = clear context, "low" = brief mention.
+
+Return ONLY valid JSON matching this schema:
+{
+  "identity": {
+    "name": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" },
+    "email": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" } | null,
+    "role": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "medium" } | null
+  },
+  "education": [
+    {
+      "degree": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" },
+      "institution": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "medium" },
+      "year": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" }
+    }
+  ],
+  "workExperience": [
+    {
+      "company": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
+      "role": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
+      "startDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
+      "endDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
+      "bullets": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": "high" },
+      "problem": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": "medium" } | null,
+      "contribution": { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": "medium" } | null,
+      "technologies": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": "high" }
+      ],
+      "outcomes": [
+        { "value": string, "sourceText": string, "sourceLocation": { "section": "PROJECTS" }, "confidence": "high" }
+      ]
+    }
+  ],
+  "skills": {
+    "technical": [{ "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": "high" }],
+    "product": [{ "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": "high" }],
+    "domain": [{ "value": string, "sourceText": string, "sourceLocation": { "section": "SKILLS" }, "confidence": "high" }]
+  },
+  "certifications": [
+    { "value": string, "sourceText": string, "sourceLocation": { "section": "CERTIFICATIONS" }, "confidence": "high" }
+  ],
+  "unclear": []
+}
+
+${labeledText ? `RESUME TEXT:\n${labeledText}` : 'Please extract from the attached document.'}
+`;
+
+      const geminiConfig: import('../ai/clientGemini').ClientGeminiConfig = { apiKey };
+      if (fileBase64) {
+        geminiConfig.inlineData = {
+          mimeType,
+          data: fileBase64,
+        };
+      }
+
+      const evidenceModel = await callClientGeminiStructured<CandidateEvidenceModel>(
+        prompt,
+        'You are an expert resume evidence extractor. Extract complete credentials with exact sourceText quotes.',
+        geminiConfig
+      );
+
+      if (evidenceModel && (evidenceModel.identity?.name?.value || evidenceModel.skills?.technical?.length || evidenceModel.workExperience?.length || evidenceModel.projects?.length)) {
+        return {
+          evidenceModel,
+          classification: {
+            documentType: 'resume',
+            documentQuality: 'good',
+            extractedTextLength: labeledText.length,
+            sectionsDetected: [],
+            canProceed: true,
+          },
+        };
+      }
+    } catch (clientErr) {
+      console.warn('Client Gemini evidence extraction fallback:', clientErr);
+    }
+
+    // Deterministic fallback when AI is offline
+    const { parseResumeEvidenceDeterministically } = await import('../ai/resumeTextParser');
+    const fallbackEvidence = parseResumeEvidenceDeterministically(fileName, labeledText);
+
+    return {
+      evidenceModel: fallbackEvidence,
+      classification: {
+        documentType: 'resume',
+        documentQuality: 'partial',
+        extractedTextLength: labeledText.length,
+        sectionsDetected: [],
+        canProceed: true,
+      },
+    };
+  },
+
+
+
+  /**
+   * Step 2: Resume Analyzer (LEGACY — kept for backward compat)
+   * Use extractResumeEvidence() for new flows.
+   */
+
   async extractResumeProfile(fileName: string, fileText?: string, fileBase64?: string): Promise<CandidateProfile> {
     const rawContent = (fileText || '').trim();
     const apiKey = getClientApiKey();
@@ -148,7 +356,8 @@ Return JSON strictly matching this schema:
 
   /**
    * Step 3: JD Analyzer
-   * Deconstructs a raw job description into structured JobProfile via analyze-jd Edge Function with Client Gemini fallback.
+   * Deconstructs a raw job description into structured JDEvidenceModel + backward-compat JobProfile.
+   * Returns { jdEvidenceModel, jobProfile } — callers should store both.
    */
   async analyzeJobDescription(title: string, company: string, rawText: string): Promise<JobProfile> {
     const cleanTitle = (title || 'Role').trim();
@@ -163,13 +372,19 @@ Return JSON strictly matching this schema:
       });
 
       if (!error && data?.jobProfile) {
-        return data.jobProfile;
+        // Store evidence model on the result for callers that want it
+        const result = data.jobProfile as any;
+        if (data.jdEvidenceModel) {
+          result.__jdEvidenceModel = data.jdEvidenceModel;
+        }
+        return result;
       }
       const errDetail = await getEdgeErrorMessage(error);
       console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
     } catch (edgeErr) {
       console.warn('Supabase analyze-jd invocation failed, cascading to client AI engine:', edgeErr);
     }
+
 
     // 2. Client Gemini Fallback Cascade
     try {
@@ -614,8 +829,236 @@ Return JSON strictly matching this schema:
   },
 
   /**
+   * Step 6B: Dynamic Opening Question Generator
+   * Uses Gemini to synthesize ONE conversational opening question strictly fulfilling the InterviewObjective.
+   */
+  async generateOpeningQuestion(params: {
+    objective: InterviewObjective;
+    lockedContext: LockedCandidateContext;
+    role: string;
+    companyName: string;
+    style?: string;
+    difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  }): Promise<Question> {
+    const { objective, lockedContext, role, companyName, style = 'realistic', difficulty = 'intermediate' } = params;
+    const apiKey = getClientApiKey();
+    const candidateName = lockedContext.derivedProfile.name || 'Candidate';
+    const evidenceSummary = objective.focusEvidenceSummary || JSON.stringify(lockedContext.evidenceModel.projects[0] || lockedContext.evidenceModel.workExperience[0] || {});
+
+    const prompt = `
+You are an executive interviewer conducting a realistic interview for the position of "${role}" at "${companyName}".
+You have selected the following precise diagnostic objective for the opening question:
+
+INTERVIEW OBJECTIVE:
+- Target Competency: ${objective.targetCompetency}
+- Focus Requirement: ${objective.focusRequirement || 'N/A'}
+- Relevant Candidate Evidence: ${evidenceSummary}
+- Diagnostic Intent: ${objective.reasoning}
+- What to look for: ${objective.lookForSignals.join(', ')}
+
+INTERVIEW STYLE & LEVEL:
+- Difficulty Level: ${difficulty}
+- Style: ${style}
+- Candidate Name: ${candidateName}
+
+
+INSTRUCTIONS:
+1. Generate ONE natural, direct opening question that begins the interview and directly targets this objective.
+2. If Candidate Evidence is available, refer naturally to their concrete background or project without reciting robotic metadata.
+3. NEVER generate sample answers, model answers, or answers of any kind.
+4. Formulate clear evaluation criteria with lookFor and redFlags.
+
+Return JSON strictly matching this schema:
+{
+  "category": "${objective.targetCompetency}",
+  "text": string,
+  "intent": "${objective.reasoning}",
+  "contextExplanation": string,
+  "expectedSignals": string[],
+  "redFlags": string[],
+  "evaluationCriteria": {
+    "coreCompetency": "${objective.targetCompetency}",
+    "lookFor": string[],
+    "redFlags": string[],
+    "rubricDimensions": ["clarity", "depth", "evidence", "relevance", "structure", "role_alignment"]
+  },
+  "adaptiveFollowUpTriggers": [
+    {
+      "condition": string,
+      "followUpProbe": string
+    }
+  ]
+}
+`;
+
+    try {
+      const generated = await callClientGeminiStructured<any>(
+        prompt,
+        'You are an executive hiring bar interviewer. Formulate grounded, realistic diagnostic questions with zero sample answers.',
+        { apiKey, temperature: 0.3 }
+      );
+
+      return {
+        id: `q_${Date.now()}_1`,
+        order: 1,
+        type: 'initial',
+        questionType: 'product_sense',
+        source: 'resume',
+        sourceReference: objective.focusRequirement || objective.targetCompetency,
+        targetCompetency: objective.targetCompetency,
+        category: generated.category || objective.targetCompetency,
+        text: generated.text || `Could you walk me through your experience with ${objective.targetCompetency}, specifically highlighting your role and key outcomes for ${role}?`,
+        intent: generated.intent || objective.reasoning,
+        contextExplanation: generated.contextExplanation || `Opening question targeting ${objective.targetCompetency}.`,
+        expectedSignals: generated.expectedSignals || objective.lookForSignals,
+        redFlags: generated.redFlags || objective.redFlagSignals,
+        expectedAnswerCharacteristics: generated.expectedSignals || objective.lookForSignals,
+        evaluationCriteria: generated.evaluationCriteria || {
+          coreCompetency: objective.targetCompetency,
+          lookFor: objective.lookForSignals,
+          redFlags: objective.redFlagSignals,
+          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
+        },
+        adaptiveFollowUpTriggers: generated.adaptiveFollowUpTriggers || [
+          { condition: 'Candidate does not provide numerical outcome', followUpProbe: 'What was the specific metric lift or outcome?' }
+        ],
+      };
+    } catch (err) {
+      console.warn('Fallback opening question generation:', err);
+      return {
+        id: `q_${Date.now()}_1`,
+        order: 1,
+        type: 'initial',
+        questionType: 'product_sense',
+        source: 'resume',
+        sourceReference: objective.targetCompetency,
+        targetCompetency: objective.targetCompetency,
+        category: objective.targetCompetency,
+        text: `To start off, could you walk me through your work on ${objective.focusRequirement || objective.targetCompetency}? Specifically, what was the core challenge and how did you measure success?`,
+        intent: objective.reasoning,
+        contextExplanation: `Opening probe on ${objective.targetCompetency}`,
+        expectedSignals: objective.lookForSignals,
+        redFlags: objective.redFlagSignals,
+        expectedAnswerCharacteristics: objective.lookForSignals,
+        evaluationCriteria: {
+          coreCompetency: objective.targetCompetency,
+          lookFor: objective.lookForSignals,
+          redFlags: objective.redFlagSignals,
+          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
+        },
+      };
+    }
+  },
+
+  /**
+   * Step 6C: Dynamic Adaptive Next Question / Follow-Up Generator
+   */
+  async generateAdaptiveQuestion(params: {
+    objective: InterviewObjective;
+    previousQuestionText: string;
+    candidateAnswerText: string;
+    role: string;
+    companyName: string;
+    isFollowUp: boolean;
+    style?: string;
+  }): Promise<Question> {
+    const { objective, previousQuestionText, candidateAnswerText, role, companyName, isFollowUp, style = 'realistic' } = params;
+    const apiKey = getClientApiKey();
+
+    const prompt = `
+You are an executive interviewer for "${role}" at "${companyName}".
+You are continuing the live interview based on the candidate's last answer.
+
+PREVIOUS QUESTION:
+"${previousQuestionText}"
+
+CANDIDATE'S ACTUAL ANSWER:
+"${candidateAnswerText.slice(0, 1500)}"
+
+NEXT OBJECTIVE TO ASSESS:
+- Target Competency: ${objective.targetCompetency}
+- Is Adaptive Follow-Up on Previous Answer: ${isFollowUp ? 'YES' : 'NO'}
+- Objective Intent: ${objective.reasoning}
+- Look for: ${objective.lookForSignals.join(', ')}
+
+INSTRUCTIONS:
+1. ${isFollowUp ? 'Formulate a direct, surgical follow-up probe referencing something specific they said (or omitted) to test depth.' : 'Formulate a natural transition and strong question targeting the next competency.'}
+2. Tone: Professional, conversational, ${style}.
+3. STRICT ZERO SAMPLE ANSWER RULE.
+
+Return JSON strictly matching this schema:
+{
+  "category": "${objective.targetCompetency}",
+  "text": string,
+  "intent": "${objective.reasoning}",
+  "contextExplanation": string,
+  "expectedSignals": string[],
+  "redFlags": string[],
+  "evaluationCriteria": {
+    "coreCompetency": "${objective.targetCompetency}",
+    "lookFor": string[],
+    "redFlags": string[],
+    "rubricDimensions": ["clarity", "depth", "evidence", "relevance", "structure", "role_alignment"]
+  }
+}
+`;
+
+    try {
+      const generated = await callClientGeminiStructured<any>(
+        prompt,
+        'You are an executive interviewer conducting a live conversational loop. Formulate adaptive probes with zero sample answers.',
+        { apiKey, temperature: 0.4 }
+      );
+
+      return {
+        id: `q_${Date.now()}_${objective.order}`,
+        order: objective.order,
+        type: isFollowUp ? 'follow_up' : 'initial',
+        questionType: isFollowUp ? 'clarification' : 'product_sense',
+        source: isFollowUp ? 'follow_up' : 'job_description',
+        sourceReference: objective.focusRequirement || objective.targetCompetency,
+        targetCompetency: objective.targetCompetency,
+        category: generated.category || objective.targetCompetency,
+        text: generated.text || (isFollowUp ? `Could you give me more detail on the specific trade-offs you made in that scenario?` : `Let's shift focus to ${objective.targetCompetency}. How do you approach this in your work?`),
+        intent: generated.intent || objective.reasoning,
+        contextExplanation: generated.contextExplanation || `Adaptive probe on ${objective.targetCompetency}`,
+        expectedSignals: generated.expectedSignals || objective.lookForSignals,
+        redFlags: generated.redFlags || objective.redFlagSignals,
+        expectedAnswerCharacteristics: generated.expectedSignals || objective.lookForSignals,
+        evaluationCriteria: generated.evaluationCriteria || {
+          coreCompetency: objective.targetCompetency,
+          lookFor: objective.lookForSignals,
+          redFlags: objective.redFlagSignals,
+          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
+        },
+      };
+    } catch (err) {
+      console.warn('Fallback adaptive question generation:', err);
+      return {
+        id: `q_${Date.now()}_${objective.order}`,
+        order: objective.order,
+        type: isFollowUp ? 'follow_up' : 'initial',
+        questionType: isFollowUp ? 'clarification' : 'product_sense',
+        source: isFollowUp ? 'follow_up' : 'job_description',
+        sourceReference: objective.targetCompetency,
+        targetCompetency: objective.targetCompetency,
+        category: objective.targetCompetency,
+        text: isFollowUp
+          ? `You mentioned that approach—could you elaborate on the specific baseline metrics or trade-offs you encountered?`
+          : `Moving on to ${objective.targetCompetency}, how have you approached this in high-stakes environments?`,
+        intent: objective.reasoning,
+        contextExplanation: `Objective: ${objective.targetCompetency}`,
+        expectedSignals: objective.lookForSignals,
+        redFlags: objective.redFlagSignals,
+        expectedAnswerCharacteristics: objective.lookForSignals,
+      };
+    }
+  },
+
+  /**
    * Step 7: Interviewer Conversational Framing & Transitions
    */
+
   async generateInterviewerRemark(params: {
     action: 'intro' | 'ask_question' | 'transition' | 'closing' | 'time_warning';
     candidateName?: string;
