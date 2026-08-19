@@ -87,7 +87,7 @@ export const SetupPage: React.FC = () => {
       // 1. Analyze JD
       setProcessingStage(`Deconstructing ${setupDraft.jobTitle} requirements...`);
       const jdText = setupDraft.jobDescriptionText.trim() || `${setupDraft.jobTitle} at ${setupDraft.company}`;
-      await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
+      const parsedJob = await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
@@ -98,7 +98,12 @@ export const SetupPage: React.FC = () => {
 
       // 2. Company Research
       setProcessingStage(`Gathering grounded ${setupDraft.company} intelligence...`);
-      await researchCompanyContext(setupDraft.company, setupDraft.jobTitle);
+      const companyData = await researchCompanyContext(
+        setupDraft.company, 
+        setupDraft.jobTitle, 
+        parsedJob, 
+        setupDraft.candidateProfile
+      );
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
@@ -107,9 +112,9 @@ export const SetupPage: React.FC = () => {
         { label: 'Synthesizing tailored anchor interview questions...', status: 'in_progress' },
       ]);
 
-      // 3. Prepare tailored interview
+      // 3. Prepare tailored interview with fresh objects
       setProcessingStage('Calibrating tailored interview questions & rubric...');
-      await prepareTailoredInterview();
+      await prepareTailoredInterview(setupDraft.candidateProfile, parsedJob, companyData);
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },

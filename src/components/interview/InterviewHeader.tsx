@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Clock, LogOut } from 'lucide-react';
 import { formatTime } from '../../lib/utils';
 import { Progress } from '../ui/Progress';
+import { useInterview } from '../../context/InterviewContext';
 
 export interface InterviewHeaderProps {
   currentQuestion: number;
@@ -16,14 +17,7 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
   totalQuestions,
   onExitClick,
 }) => {
-  const [timeLeft, setTimeLeft] = useState(1476); // 24:36 in seconds
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const { remainingSeconds } = useInterview();
 
   return (
     <header className="w-full border-b border-white/[0.08] bg-[#0E0F17]/80 backdrop-blur-md px-6 py-4 flex items-center justify-between">
@@ -41,7 +35,7 @@ export const InterviewHeader: React.FC<InterviewHeaderProps> = ({
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 text-xs text-foreground-muted">
           <Clock size={14} />
-          <span className="font-mono text-white font-medium">{formatTime(timeLeft)}</span>
+          <span className="font-mono text-white font-medium">{formatTime(remainingSeconds)}</span>
           <span className="hidden sm:inline text-foreground-subtle">Time remaining</span>
         </div>
 

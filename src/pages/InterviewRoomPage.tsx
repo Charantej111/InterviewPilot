@@ -188,15 +188,10 @@ export const InterviewRoomPage: React.FC = () => {
             title="Synthesizing Candidate Dossier"
             stage="Evaluating holistic responses across STAR rubric, metrics depth, and hiring bar standards..."
           />
-        ) : isAdvancing ? (
-          <AILoader
-            title="Saving Response"
-            stage="Loading next anchor question..."
-          />
         ) : (
-          <div ref={questionContainerRef} className="space-y-6">
+          <div ref={questionContainerRef} className="space-y-6 animate-fadeIn">
             {/* Question Card */}
-            <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-zinc-900/90 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl text-left">
+            <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-zinc-900/90 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl text-left transition-all">
               {activeQuestion && (
                 <QuestionBlock
                   question={activeQuestion}

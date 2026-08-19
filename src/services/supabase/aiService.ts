@@ -38,30 +38,42 @@ export const aiService = {
       });
 
       if (!error && data?.candidateProfile) {
-        return data.candidateProfile;
+        const profile = data.candidateProfile;
+        if (profile.isValidResume === false) {
+          throw new Error(profile.invalidReason || `Uploaded document "${fileName}" is not a valid candidate resume (e.g. ticket, invoice, or non-CV file). Please upload a valid resume PDF or Word document.`);
+        }
+        return profile;
       }
       const errDetail = await getEdgeErrorMessage(error);
+      if (errDetail?.includes('not a valid candidate resume')) {
+        throw new Error(errDetail);
+      }
       console.warn('Supabase analyze-resume Edge Function warning, cascading to client AI engine:', errDetail);
-    } catch (edgeErr) {
+    } catch (edgeErr: any) {
+      if (edgeErr?.message?.includes('not a valid candidate resume')) {
+        throw edgeErr;
+      }
       console.warn('Supabase analyze-resume invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     // 2. Client Gemini Fallback Cascade
     try {
       const prompt = `
-Extract a comprehensive, high-integrity candidate profile from the following resume document.
-Resume File Name: ${fileName || 'Resume.pdf'}
+First, validate whether the provided document is a valid candidate resume (CV, work history, professional bio).
+If it is NOT a resume (e.g. it is a train ticket, flight boarding pass, invoice, receipt, generic article, or non-CV file), set "isValidResume": false and explain in "invalidReason".
 
-${rawContent ? `Resume Extracted Text:\n${rawContent}` : 'Inspect the attached resume document directly.'}
+If it IS a valid resume:
+Set "isValidResume": true, "invalidReason": null, and extract the candidate profile.
 
 CRITICAL RULES:
 1. Extract true deliverables, metrics, domain, and skills evidenced in the resume.
 2. DO NOT fabricate credentials, previous employers, degrees, or metrics.
-3. If the candidate is a fresher or intern in Product Management, Marketing, Design, etc., reflect their exact true background (e.g. do NOT fabricate software engineering or security experience).
-4. If candidate name is not explicitly mentioned, derive a professional identifier from the file name.
+3. If candidate name is not explicitly mentioned, derive a professional identifier from the file name.
 
 Return JSON strictly matching this schema:
 {
+  "isValidResume": boolean,
+  "invalidReason": string | null,
   "name": string,
   "summary": string,
   "education": [
@@ -97,33 +109,40 @@ Return JSON strictly matching this schema:
 
       const config: any = { apiKey };
       if (fileBase64) {
+        const lowerName = (fileName || '').toLowerCase();
+        let mimeType = 'application/pdf';
+        if (lowerName.endsWith('.doc')) mimeType = 'application/msword';
+        else if (lowerName.endsWith('.docx')) mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
         config.inlineData = {
-          mimeType: fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream',
+          mimeType,
           data: fileBase64,
         };
       }
 
-      return await callClientGeminiStructured<CandidateProfile>(
+      const parsed = await callClientGeminiStructured<CandidateProfile & { isValidResume?: boolean; invalidReason?: string }>(
         prompt,
         'You are an executive talent assessor and hiring committee chairperson. Extract exact candidate deliverables without hallucinating experience.',
         config
       );
-    } catch (clientErr) {
-      console.warn('Client Gemini extraction fallback, using structured baseline:', clientErr);
+
+      if (parsed.isValidResume === false) {
+        throw new Error(parsed.invalidReason || `Uploaded document "${fileName}" is not a valid resume.`);
+      }
+
+      return parsed;
+    } catch (clientErr: any) {
+      if (clientErr?.message?.includes('not a valid resume')) {
+        throw clientErr;
+      }
+      console.warn('AI API rate-limited or unavailable, parsing actual resume text deterministically:', clientErr);
       
-      const candidateName = fileName ? fileName.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ') : 'Candidate';
-      return {
-        name: candidateName,
-        summary: `Candidate profile extracted from ${fileName}.`,
-        education: [{ degree: 'Bachelor Degree', institution: 'University', year: '2023' }],
-        experience: [{ role: 'Associate / Intern', company: 'Previous Organization', duration: '2023 - 2024', highlights: ['Contributed to project deliverables.'] }],
-        projects: [{ name: 'Core Project Initiative', description: 'Collaborated on cross-functional deliverables.', technologies: [], metrics: '' }],
-        skills: ['Communication', 'Project Management', 'Problem Solving'],
-        certifications: [],
-        achievements: [],
-        strengths: ['Communication', 'Analytical Thinking'],
-        potentialGaps: [],
-      };
+      if (rawContent && rawContent.length > 15) {
+        const { parseResumeTextDeterministically } = await import('../ai/resumeTextParser');
+        return parseResumeTextDeterministically(fileName, rawContent);
+      }
+
+      throw new Error(clientErr.message || `Could not parse resume from "${fileName}". Please ensure the document contains readable text or check your Gemini API key quota.`);
     }
   },
 
@@ -482,11 +501,12 @@ Interview Configuration:
 - Interview Style: ${settings?.style || 'realistic'}
 - Focus Areas: ${JSON.stringify(settings?.focusAreas || [])}
 
-CRITICAL RULES:
+CRITICAL TAILORING RULES:
 1. STRICT ZERO SAMPLE ANSWER RULE: NEVER generate, include, or store sample_answer, model_answer, ideal_answer, or verbatim answers.
-2. Formulate questions anchored on candidate's real resume deliverables and the target company's real products/architecture.
-3. Include targeted probes for identified actionable gaps.
-4. Each question must include:
+2. RESUME ANCHORING REQUIREMENT: At least 3 of the ${questionCount} questions MUST explicitly name and reference a SPECIFIC project name, technology, tool, or deliverable directly from the Candidate's Resume (e.g., "In your project '[Project Name]', you used [Technology] to... How would you scale that approach for ${targetCompany}...").
+3. TARGET COMPANY ANCHORING: Questions must connect the candidate's actual experience to real challenges, products, or system architecture at ${targetCompany}.
+4. ACTIONABLE GAP PROBING: Include explicit questions targeting missing or unproven job requirements identified in Targeted Gaps, probing whether the candidate has unlisted experience or how their transferable skills apply.
+5. Each question must include:
    - "order": number
    - "category": string
    - "text": string
@@ -762,51 +782,15 @@ Return strict JSON:
         followUpTriggerReason: constrained.followUpReasonCode,
       };
     } catch (clientErr) {
-      console.warn('Client Gemini evaluation fallback, applying deterministic baseline constraints:', clientErr);
-      const { applyDeterministicConstraints } = await import('../ai/scoringRubric');
-      
-      const wordCount = cleanAnswer.split(/\s+/).filter(Boolean).length;
-      const isShort = wordCount < 10;
-      const rawProposal = {
-        answerClassification: isShort ? ('weak' as const) : ('adequate' as const),
-        relevanceGate: { status: 'answered' as const, score: isShort ? 4.0 : 7.0, reason: 'Addressed prompt' },
-        breakdown: {
-          relevance: isShort ? 4.0 : 7.0,
-          structure: isShort ? 3.5 : 6.8,
-          clarity: isShort ? 4.5 : 7.2,
-          depth: isShort ? 3.0 : 6.5,
-          evidence: isShort ? 2.5 : 5.8,
-          roleAlignment: isShort ? 4.0 : 7.0,
-        },
-        whatWorked: ['Engaged with the core prompt.'],
-        whatHeldYouBack: ['Could explicitly quantify baseline benchmarks and specific decisions.'],
-        tryThisNextTime: {
-          framework: 'STAR Framework with Baseline Metrics',
-          suggestion: 'Quantify your measurable outcome and compare it against your starting baseline.',
-          promptToImprove: 'What was the percentage change or business impact of your decision?',
-          examplePhrasing: 'By redesigning the caching tier, we reduced latency by 65%.',
-        },
-      };
-
-      const constrained = applyDeterministicConstraints(
-        rawProposal,
+      console.warn('AI evaluation API unavailable, using dynamic deterministic rubric evaluator:', clientErr);
+      const { evaluateAnswerDeterministically } = await import('../ai/deterministicAnswerEvaluator');
+      return evaluateAnswerDeterministically({
         question,
-        cleanAnswer
-      );
-
-      return {
-        questionId: question?.id || 'q_unknown',
-        overallScore: constrained.overallScore,
-        scoreInterval: constrained.scoreInterval,
-        answerClassification: constrained.answerClassification,
-        relevanceGate: constrained.relevanceGate,
-        professionalism: constrained.professionalism,
-        breakdown: constrained.breakdown,
-        whatWorked: constrained.whatWorked,
-        whatHeldYouBack: constrained.whatHeldYouBack,
-        tryThisNextTime: constrained.tryThisNextTime,
-        followUpNeeded: false,
-      };
+        answerText: cleanAnswer,
+        role,
+        company,
+        difficulty,
+      });
     }
   },
 

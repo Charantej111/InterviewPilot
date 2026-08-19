@@ -39,38 +39,49 @@ function parseCandidateYears(candidate: any): number {
   return Math.round((totalMonths / 12) * 10) / 10;
 }
 
-function calculateDomainRelevance(candidate: any, targetRole: string): number {
+function calculateDomainRelevance(candidate: any, targetRole: string, jobKeywords: string[] = []): number {
   const targetLower = (targetRole || '').toLowerCase();
-  const targetWords = targetLower.split(/[\s/,-]+/).filter((w: string) => w.length > 2);
+
+  const STOP_WORDS = new Set([
+    'senior', 'junior', 'lead', 'staff', 'principal', 'head', 'associate', 'intern', 'fresher',
+    'manager', 'director', 'vice', 'president', 'officer', 'specialist', 'analyst', 'engineer',
+    'developer', 'consultant', 'administrator', 'executive', 'team', 'and', 'for', 'the', 'with', 'role'
+  ]);
+
+  const coreRoleWords = targetLower
+    .split(/[\s/,-]+/)
+    .map((w: string) => w.trim())
+    .filter((w: string) => w.length > 2 && !STOP_WORDS.has(w));
 
   const candidateText = [
     candidate?.summary || '',
-    ...(candidate?.experience || []).map((e: any) => e.role),
+    ...(candidate?.experience || []).map((e: any) => `${e.role} ${e.company} ${(e.highlights || []).join(' ')}`),
     ...(candidate?.skills || []),
-    ...(candidate?.projects || []).map((p: any) => p.name),
-  ].join(' ').toLowerCase();
+    ...(candidate?.projects || []).map((p: any) => `${p.name} ${p.description} ${(p.technologies || []).join(' ')}`),
+  ]
+    .join(' ')
+    .toLowerCase();
 
-  const isSecurityRole = /cyber|security|soc|infosec|penetration|siem|vulnerability/i.test(targetLower);
-  const isProductRole = /product\s+manager|pm|product\s+owner/i.test(targetLower);
+  const allTargetKeywords = Array.from(
+    new Set([...coreRoleWords, ...jobKeywords.map((k: string) => k.toLowerCase())])
+  ).filter((w: string) => w.length > 2 && !STOP_WORDS.has(w));
 
-  const candidateIsPM = /product\s+manager|associate\s+pm|product\s+management|user\s+stories|wireframing|figma/i.test(candidateText);
-  const candidateIsSecurity = /security|cyber|penetration|firewall|siem|splunk|soc|vulnerability/i.test(candidateText);
-
-  if (isSecurityRole && candidateIsPM && !candidateIsSecurity) {
-    return 0.05;
+  if (allTargetKeywords.length === 0) {
+    const fallbackWords = targetLower.split(/\s+/).filter((w: string) => w.length > 2);
+    if (fallbackWords.length === 0) return 1.0;
+    const matches = fallbackWords.filter((w: string) => candidateText.includes(w)).length;
+    return matches / fallbackWords.length;
   }
-  if (isProductRole && !candidateIsPM && candidateIsSecurity) {
-    return 0.15;
-  }
 
-  let matchedWordCount = 0;
-  for (const word of targetWords) {
-    if (candidateText.includes(word)) {
-      matchedWordCount++;
+  let matchedKeywordsCount = 0;
+  for (const keyword of allTargetKeywords) {
+    if (candidateText.includes(keyword)) {
+      matchedKeywordsCount++;
     }
   }
 
-  return Math.min(1.0, Math.max(0.1, matchedWordCount / Math.max(1, targetWords.length)));
+  const relevanceRatio = matchedKeywordsCount / allTargetKeywords.length;
+  return Math.min(1.0, Math.max(0.0, Math.round(relevanceRatio * 100) / 100));
 }
 
 serve(async (req: Request) => {
@@ -102,7 +113,7 @@ serve(async (req: Request) => {
       : ['Domain Execution'];
     const reqYears = parseRequiredYears(jobProfile?.experienceRequirements);
     const candidateYears = parseCandidateYears(candidateProfile);
-    const domainRelevance = calculateDomainRelevance(candidateProfile, jobProfile?.role || '');
+    const domainRelevance = calculateDomainRelevance(candidateProfile, jobProfile?.role || '', [...(jobProfile?.keywords || []), ...(jobProfile?.requiredSkills || [])]);
 
     const directMatches: any[] = [];
     const transferableMatches: any[] = [];
@@ -226,7 +237,9 @@ serve(async (req: Request) => {
     const rawScore = Math.min(100, Math.max(0, requiredSkillsCoverage + experienceAlignment + competenciesMatch));
 
     let blockingPenaltyMultiplier = 1.0;
-    if (blockingGaps.length >= 2 || (blockingGaps.length >= 1 && domainRelevance <= 0.1)) {
+    if (matchedSkillsCount === 0 && domainRelevance === 0) {
+      blockingPenaltyMultiplier = 0.0;
+    } else if (blockingGaps.length >= 2 || (blockingGaps.length >= 1 && domainRelevance <= 0.1)) {
       blockingPenaltyMultiplier = 0.35;
     } else if (blockingGaps.length === 1) {
       blockingPenaltyMultiplier = 0.65;

@@ -209,6 +209,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       resumeFileSize: record.fileSizeFormatted,
       resumeParsed: true,
       candidateProfile: profile,
+      matchAnalysis: null, // Invalidate stale cached match analysis
+      tailoredQuestions: [], // Invalidate stale cached questions
     });
 
     return {
@@ -244,12 +246,19 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       jobDescriptionText: rawText,
       jobDescriptionId: savedId,
       jobProfile: parsedJob,
+      matchAnalysis: null, // Invalidate stale cached match analysis
+      tailoredQuestions: [],
     });
 
     return parsedJob;
   };
 
-  const researchCompanyContext = async (companyName: string, role: string): Promise<CompanyResearchData> => {
+  const researchCompanyContext = async (
+    companyName: string, 
+    role: string,
+    currentJobProfile?: JobProfile | null,
+    currentCandidateProfile?: CandidateProfile | null
+  ): Promise<CompanyResearchData> => {
     let researchData: CompanyResearchData | null = await companyResearchService.getCachedResearch(companyName, role);
     if (!researchData) {
       const generated = await aiService.researchCompany(companyName, role);
@@ -264,12 +273,14 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const finalResearch: CompanyResearchData = researchData;
+    const effectiveCandidate = currentCandidateProfile || setupDraft.candidateProfile;
+    const effectiveJob = currentJobProfile || setupDraft.jobProfile;
 
-    // Automatically compute Match Analysis if candidate and job exist
-    if (setupDraft.candidateProfile && setupDraft.jobProfile) {
+    // Automatically compute fresh Match Analysis if candidate and job exist
+    if (effectiveCandidate && effectiveJob) {
       const match = await aiService.computeMatchAnalysis(
-        setupDraft.candidateProfile,
-        setupDraft.jobProfile,
+        effectiveCandidate,
+        effectiveJob,
         finalResearch
       );
       updateSetupDraft({
@@ -299,11 +310,17 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     updateSetupDraft({ matchAnalysis: updatedMatch });
   };
 
-  const prepareTailoredInterview = async (): Promise<Question[]> => {
-    const candidate = setupDraft.candidateProfile || (await aiService.extractResumeProfile(setupDraft.resumeName || 'Resume.pdf'));
-    const job = setupDraft.jobProfile || (await aiService.analyzeJobDescription(setupDraft.jobTitle || 'Role', setupDraft.company || 'Company', setupDraft.jobDescriptionText));
-    const company = setupDraft.companyResearch;
-    const match = setupDraft.matchAnalysis || (await aiService.computeMatchAnalysis(candidate, job, company));
+  const prepareTailoredInterview = async (
+    overrideCandidate?: CandidateProfile | null,
+    overrideJob?: JobProfile | null,
+    overrideCompany?: CompanyResearchData | null
+  ): Promise<Question[]> => {
+    const candidate = overrideCandidate || setupDraft.candidateProfile || (await aiService.extractResumeProfile(setupDraft.resumeName || 'Resume.pdf'));
+    const job = overrideJob || setupDraft.jobProfile || (await aiService.analyzeJobDescription(setupDraft.jobTitle || 'Role', setupDraft.company || 'Company', setupDraft.jobDescriptionText));
+    const company = overrideCompany || setupDraft.companyResearch;
+    
+    // Always compute fresh match analysis for current candidate + job
+    const match = await aiService.computeMatchAnalysis(candidate, job, company);
 
     const questions = await aiService.prepareInterview({
       resume: candidate,
@@ -321,6 +338,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
 
     updateSetupDraft({
+      candidateProfile: candidate,
+      jobProfile: job,
+      companyResearch: company,
       tailoredQuestions: questions,
       matchAnalysis: match,
     });

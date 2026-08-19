@@ -51,11 +51,12 @@ Interview Configuration:
 - Interview Style: ${settings?.style || 'realistic'}
 - Focus Areas: ${JSON.stringify(settings?.focusAreas || [])}
 
-CRITICAL RULES:
+CRITICAL TAILORING RULES:
 1. STRICT ZERO SAMPLE ANSWER RULE: NEVER generate, include, or store sample_answer, model_answer, ideal_answer, or verbatim answers.
-2. Formulate questions anchored on candidate's real resume deliverables and the target company's real products/architecture.
-3. Include targeted probes for identified actionable gaps.
-4. Each question must include:
+2. RESUME ANCHORING REQUIREMENT: At least 3 of the ${questionCount} questions MUST explicitly name and reference a SPECIFIC project name, technology, tool, or deliverable directly from the Candidate's Resume (e.g., "In your project '[Project Name]', you used [Technology] to... How would you scale that approach for ${targetCompany}...").
+3. TARGET COMPANY ANCHORING: Questions must connect the candidate's actual experience to real challenges, products, or system architecture at ${targetCompany}.
+4. ACTIONABLE GAP PROBING: Include explicit questions targeting missing or unproven job requirements identified in Targeted Gaps, probing whether the candidate has unlisted experience or how their transferable skills apply.
+5. Each question must include:
    - "order": number
    - "category": string
    - "text": string (the exact spoken interview question prompt)

@@ -89,26 +89,30 @@ export const resumeService = {
       const uint8 = new Uint8Array(buffer);
       const textDecoder = new TextDecoder('utf-8', { fatal: false });
       const rawString = textDecoder.decode(uint8);
-      
-      // Extract text content from PDF text streams if present
+
+      // Extract text content from PDF text streams (Tj/TJ operators)
       const pdfTextMatches = rawString.match(/\(([^()]+)\)\s*T[jJ]/g);
       if (pdfTextMatches && pdfTextMatches.length > 5) {
         const extracted = pdfTextMatches
           .map((m) => m.replace(/^\(/, '').replace(/\)\s*T[jJ]$/, ''))
+          .filter((t) => t.length > 1 && !/^\\[0-9]/.test(t))
           .join(' ');
         if (extracted.length > 50) {
           return extracted;
         }
       }
 
+      // Fallback: filter clean printable text sequences
       const cleanChars = rawString.replace(/[^\x20-\x7E\t\n\r]/g, ' ');
-      const words = cleanChars.split(/\s+/).filter((w) => w.length > 1 && !w.startsWith('/') && !w.includes('obj') && !w.includes('endobj'));
+      const words = cleanChars
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && !w.startsWith('/') && !w.includes('obj') && !w.includes('endobj') && !w.includes('stream') && !/^[0-9]+$/.test(w));
       if (words.length > 15) {
         return words.join(' ');
       }
       return '';
     } catch (err) {
-      console.warn('Could not extract raw text from file, using fallback extraction:', err);
+      console.warn('Could not extract raw text from file, passing base64 inlineData to multimodal AI:', err);
       return '';
     }
   },
