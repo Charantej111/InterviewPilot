@@ -8,12 +8,13 @@ export interface DarkGradientBgProps {
 
 export const DarkGradientBg: React.FC<DarkGradientBgProps> = ({ children, className }) => {
   return (
-    <div className={cn('relative min-h-screen w-full bg-black overflow-hidden', className)}>
+    <div className={cn('relative min-h-screen w-full bg-slate-50 dark:bg-[#090a0f] text-foreground transition-colors overflow-hidden', className)}>
       <div className="absolute inset-0 pointer-events-none">
+        {/* Dark mode atmospheric streaks */}
         <div
-          className="absolute inset-0 opacity-100"
+          className="absolute inset-0 hidden dark:block opacity-100"
           style={{
-            background: 'radial-gradient(100% 100% at 0% 0%, rgb(46, 46, 46) 0%, rgb(0, 0, 0) 100%)',
+            background: 'radial-gradient(100% 100% at 0% 0%, rgb(30, 30, 45) 0%, rgb(9, 10, 15) 100%)',
             mask: 'radial-gradient(125% 100% at 0% 0%, rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.224) 88.2883%, rgba(0, 0, 0, 0) 100%)',
             WebkitMask: 'radial-gradient(125% 100% at 0% 0%, rgb(0, 0, 0) 0%, rgba(0, 0, 0, 0.224) 88.2883%, rgba(0, 0, 0, 0) 100%)',
           }}
@@ -37,38 +38,20 @@ export const DarkGradientBg: React.FC<DarkGradientBgProps> = ({ children, classN
               transform: 'skewX(45deg)',
             }}
           />
-          <div
-            className="absolute inset-0 opacity-20"
-            style={{
-              background: 'linear-gradient(rgb(0, 207, 255) 0%, rgba(0, 207, 255, 0) 100%)',
-              mask: 'linear-gradient(90deg, rgba(0, 0, 0, 0) 9%, rgb(0, 0, 0) 20%, rgba(0, 0, 0, 0.55) 28%, rgba(0, 0, 0, 0.424) 40%, rgb(0, 0, 0) 48%, rgba(0, 0, 0, 0.267) 54%, rgba(0, 0, 0, 0.13) 78%, rgb(0, 0, 0) 88%, rgba(0, 0, 0, 0) 97%)',
-              WebkitMask: 'linear-gradient(90deg, rgba(0, 0, 0, 0) 9%, rgb(0, 0, 0) 20%, rgba(0, 0, 0, 0.55) 28%, rgba(0, 0, 0, 0.424) 40%, rgb(0, 0, 0) 48%, rgba(0, 0, 0, 0.267) 54%, rgba(0, 0, 0, 0.13) 78%, rgb(0, 0, 0) 88%, rgba(0, 0, 0, 0) 97%)',
-              transform: 'skewX(45deg)',
-            }}
-          />
-          <div
-            className="absolute inset-0 opacity-20"
-            style={{
-              background: 'linear-gradient(rgb(0, 207, 255) 0%, rgba(0, 207, 255, 0) 100%)',
-              mask: 'linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgb(0, 0, 0) 17%, rgba(0, 0, 0, 0.55) 26%, rgb(0, 0, 0) 35%, rgba(0, 0, 0, 0) 47%, rgba(0, 0, 0, 0.13) 69%, rgb(0, 0, 0) 79%, rgba(0, 0, 0, 0) 97%)',
-              WebkitMask: 'linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgb(0, 0, 0) 17%, rgba(0, 0, 0, 0.55) 26%, rgb(0, 0, 0) 35%, rgba(0, 0, 0, 0) 47%, rgba(0, 0, 0, 0.13) 69%, rgb(0, 0, 0) 79%, rgba(0, 0, 0, 0) 97%)',
-              transform: 'skewX(45deg)',
-            }}
-          />
         </div>
+
+        {/* Light mode subtle gradient halo */}
+        <div className="absolute inset-0 block dark:hidden bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(99,102,241,0.12),rgba(255,255,255,0))]" />
       </div>
 
       {/* Subtle dot pattern overlay */}
       <div
-        className="absolute inset-0 opacity-15 pointer-events-none"
+        className="absolute inset-0 opacity-20 dark:opacity-15 pointer-events-none"
         style={{
-          backgroundImage: `radial-gradient(circle at 1px 1px, rgba(255,255,255,0.4) 1px, transparent 0)`,
+          backgroundImage: `radial-gradient(circle at 1px 1px, currentColor 1px, transparent 0)`,
           backgroundSize: '24px 24px',
         }}
       />
-
-      {/* Subtle radial center highlight */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(56,189,248,0.08)_0%,transparent_70%)] pointer-events-none" />
 
       {/* Content */}
       <div className="relative z-10 w-full min-h-screen">{children}</div>

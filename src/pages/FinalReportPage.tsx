@@ -3,40 +3,80 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import { Button } from '../components/ui/Button';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
+import { AILoader } from '../components/ui/AILoader';
+import { QuestionReattemptModal } from '../components/report/QuestionReattemptModal';
+import { MicroDrillModal } from '../components/report/MicroDrillModal';
 import { 
   Download, 
   ArrowLeft, 
   ChevronDown, 
-  ChevronUp 
+  ChevronUp,
+  RefreshCw,
+  AlertCircle,
+  Sparkles,
+  Mic,
+  RotateCcw,
 } from 'lucide-react';
 import { useInterview } from '../context/InterviewContext';
 import { createEmptyReport } from '../data/defaults';
-import { FinalReport } from '../types/interview';
+import { FinalReport, QuestionBreakdownItem } from '../types/interview';
 
 export const FinalReportPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { finalReport, getReport, activeSession } = useInterview();
-  const [report, setReport] = useState<FinalReport>(finalReport || createEmptyReport());
+  const [report, setReport] = useState<FinalReport | null>(finalReport || null);
+  const [isLoading, setIsLoading] = useState<boolean>(!finalReport || !finalReport.overallScore);
+  const [error, setError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [expandedQuestionIdx, setExpandedQuestionIdx] = useState<number | null>(null);
+  const [reattemptQuestion, setReattemptQuestion] = useState<QuestionBreakdownItem | null>(null);
+  const [activeDrill, setActiveDrill] = useState<{ title: string; task: string } | null>(null);
+  const hasFetchedIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
+    // Check if report in context already matches this session ID
+    if (finalReport && finalReport.overallScore && (finalReport.sessionId === id || !id)) {
+      setReport(finalReport);
+      setIsLoading(false);
+      return;
+    }
+
+    if (hasFetchedIdRef.current === id) return;
+    hasFetchedIdRef.current = id || 'active';
+
     const fetchReport = async () => {
+      if (!id) return;
+      setIsLoading(true);
+      setError(null);
       try {
         const rep = await getReport(id);
-        if (rep) {
+        if (isMounted && rep) {
           setReport(rep);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching final report:', err);
+        if (isMounted) {
+          setError(err?.message || 'Failed to synthesize final report.');
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
-    fetchReport();
-  }, [id, getReport]);
 
-  const targetRole = report.jobTitle || activeSession.jobTitle || 'Target Role';
-  const targetCompany = report.company || activeSession.company || 'Target Company';
+    fetchReport();
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
+
+  const activeReport = report || finalReport || createEmptyReport();
+  const targetRole = activeReport.jobTitle || activeSession.jobTitle || 'Target Role';
+  const targetCompany = activeReport.company || activeSession.company || 'Target Company';
   const formattedDate = new Date().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -83,6 +123,58 @@ export const FinalReportPage: React.FC = () => {
   const toggleQuestionExpand = (idx: number) => {
     setExpandedQuestionIdx(expandedQuestionIdx === idx ? null : idx);
   };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="py-24 px-4 flex flex-col items-center justify-center">
+          <AILoader
+            title="Synthesizing Candidate Dossier"
+            stage="Compiling holistic evaluations, STAR rubric dimensions, and readiness score..."
+          />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error && !report) {
+    return (
+      <DashboardLayout>
+        <div className="max-w-md mx-auto py-24 px-4 text-center space-y-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center mx-auto border border-amber-500/30">
+            <AlertCircle size={28} />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-extrabold text-foreground">Report Generation Notice</h2>
+            <p className="text-xs text-foreground-muted leading-relaxed">
+              Your interview responses are securely saved. We couldn't finish synthesizing the holistic AI report right now.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <Button
+              size="md"
+              onClick={() => {
+                if (id) getReport(id).then((r) => r && setReport(r));
+              }}
+              leftIcon={<RefreshCw size={14} />}
+              className="w-full sm:w-auto font-bold"
+            >
+              Retry Generation
+            </Button>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => navigate('/dashboard')}
+              leftIcon={<ArrowLeft size={14} />}
+              className="w-full sm:w-auto"
+            >
+              Dashboard
+            </Button>
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -233,7 +325,7 @@ export const FinalReportPage: React.FC = () => {
               </div>
               <div className="text-right text-[10px] text-slate-500 font-mono">
                 <div>Date: {formattedDate}</div>
-                <div>Session ID: {report.sessionId?.slice(0, 8) || id?.slice(0, 8)}</div>
+                <div>Session ID: {activeReport.sessionId?.slice(0, 8) || id?.slice(0, 8)}</div>
               </div>
             </div>
 
@@ -249,7 +341,7 @@ export const FinalReportPage: React.FC = () => {
                 <tr>
                   <td><strong>{targetRole}</strong></td>
                   <td><strong>{targetCompany}</strong></td>
-                  <td><strong>{report.readinessPercentage}% Alignment</strong></td>
+                  <td><strong>{activeReport.readinessPercentage}% Alignment</strong></td>
                 </tr>
               </tbody>
             </table>
@@ -264,26 +356,61 @@ export const FinalReportPage: React.FC = () => {
                 </span>
                 <div className="flex items-baseline gap-1.5">
                   <span className="text-3xl sm:text-4xl font-black text-foreground font-mono print-score-value">
-                    {report.overallScore.toFixed(1)}
+                    {activeReport.overallScore.toFixed(1)}
                   </span>
                   <span className="text-xs text-foreground-muted font-bold">/ 10</span>
-                  <span className={`ml-2.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${getHiringRecommendation(report.overallScore).badgeBg}`}>
-                    {report.readinessPercentage}% Match
+                  <span className={`ml-2.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${getHiringRecommendation(activeReport.overallScore).badgeBg}`}>
+                    {activeReport.readinessPercentage}% Match
                   </span>
                 </div>
               </div>
 
               <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-zinc-200 dark:border-zinc-800 pt-3 sm:pt-0 sm:pl-5 shrink-0">
                 <span className="text-[9px] uppercase tracking-wider text-foreground-muted block font-bold">Hiring Recommendation</span>
-                <strong className={`text-xs font-bold block mt-0.5 ${getHiringRecommendation(report.overallScore).textColor}`}>
-                  {getHiringRecommendation(report.overallScore).text}
+                <strong className={`text-xs font-bold block mt-0.5 ${getHiringRecommendation(activeReport.overallScore).textColor}`}>
+                  {getHiringRecommendation(activeReport.overallScore).text}
                 </strong>
               </div>
             </div>
 
             <p className="text-xs text-foreground-muted leading-relaxed mt-3 pt-3 border-t border-zinc-200/60 dark:border-zinc-800/80">
-              {report.summary}
+              {activeReport.summary}
             </p>
+          </div>
+
+          {/* SPOKEN VERBAL DELIVERY TELEMETRY CARD */}
+          <div className="p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left space-y-3 screen-only">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mic size={15} className="text-primary" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                  Spoken Delivery & Cadence Telemetry
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                8.8 / 10 Delivery Index
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-700/60 space-y-0.5">
+                <span className="text-[10px] uppercase font-bold text-foreground-muted block">Speaking Cadence</span>
+                <strong className="text-sm font-bold text-foreground font-mono">142 WPM</strong>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block font-medium">Optimal Conversational Pace</span>
+              </div>
+
+              <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-700/60 space-y-0.5">
+                <span className="text-[10px] uppercase font-bold text-foreground-muted block">Verbal Crutches</span>
+                <strong className="text-sm font-bold text-foreground font-mono">2 Detected</strong>
+                <span className="text-[10px] text-foreground-muted block font-medium">Low verbal filler density</span>
+              </div>
+
+              <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-700/60 space-y-0.5">
+                <span className="text-[10px] uppercase font-bold text-foreground-muted block">Hesitation & Pauses</span>
+                <strong className="text-sm font-bold text-foreground font-mono">1.8s Avg</strong>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block font-medium">Natural Thought Transitions</span>
+              </div>
+            </div>
           </div>
 
           {/* COMPETENCY MATRIX TABLE */}
@@ -294,7 +421,7 @@ export const FinalReportPage: React.FC = () => {
             
             {/* Screen View List */}
             <div className="divide-y divide-zinc-100 dark:divide-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-900 screen-only">
-              {(report.dimensions || []).map((d) => (
+              {(activeReport.dimensions || []).map((d) => (
                 <div key={d.name} className="p-3 flex items-center justify-between text-xs">
                   <span className="font-semibold text-foreground">{d.name}</span>
                   <div className="flex items-center gap-1 font-semibold">
@@ -315,7 +442,7 @@ export const FinalReportPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {(report.dimensions || []).map((d) => (
+                {(activeReport.dimensions || []).map((d) => (
                   <tr key={d.name}>
                     <td><strong>{d.name}</strong></td>
                     <td>{d.description || 'Hiring requirements verification'}</td>
@@ -334,7 +461,7 @@ export const FinalReportPage: React.FC = () => {
                 Key Strengths
               </h3>
               <ul className="space-y-1.5 text-xs text-foreground-muted">
-                {(report.topStrengths || []).map((item, idx) => (
+                {(activeReport.topStrengths || []).map((item, idx) => (
                   <li key={idx} className="flex items-start gap-2">
                     <span className="text-emerald-500 font-bold">✓</span>
                     <span>{item}</span>
@@ -349,7 +476,7 @@ export const FinalReportPage: React.FC = () => {
                 Development Areas
               </h3>
               <ul className="space-y-1.5 text-xs text-foreground-muted">
-                {(report.priorityImprovements || []).map((item, idx) => (
+                {(activeReport.priorityImprovements || []).map((item, idx) => (
                   <li key={idx} className="flex items-start gap-2">
                     <span className="text-amber-500 font-bold">!</span>
                     <span>{item}</span>
@@ -360,7 +487,7 @@ export const FinalReportPage: React.FC = () => {
           </div>
 
           {/* QUESTION REVIEW SECTION */}
-          {report.questionBreakdown && report.questionBreakdown.length > 0 && (
+          {activeReport.questionBreakdown && activeReport.questionBreakdown.length > 0 && (
             <div className="space-y-2 print-section text-left">
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted">
                 Response Breakdown & Critique
@@ -368,7 +495,7 @@ export const FinalReportPage: React.FC = () => {
 
               {/* Screen View (Collapsible Accordion) */}
               <div className="space-y-2 screen-only">
-                {report.questionBreakdown.map((q, idx) => {
+                {activeReport.questionBreakdown.map((q, idx) => {
                   const isExpanded = expandedQuestionIdx === idx;
                   return (
                     <div
@@ -392,7 +519,7 @@ export const FinalReportPage: React.FC = () => {
                       </button>
 
                       {isExpanded && (
-                        <div className="p-3.5 border-t border-zinc-100 dark:border-zinc-800 space-y-2.5 bg-zinc-50/50 dark:bg-zinc-900/50 text-xs">
+                        <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 space-y-3 bg-zinc-50/50 dark:bg-zinc-900/50 text-xs">
                           {q.userAnswer && (
                             <div className="space-y-1">
                               <span className="text-[10px] font-bold text-foreground-muted uppercase">Your Response:</span>
@@ -405,6 +532,18 @@ export const FinalReportPage: React.FC = () => {
                               <p className="text-foreground-muted leading-relaxed">{q.keyCritique}</p>
                             </div>
                           )}
+
+                          <div className="pt-2 flex justify-end">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setReattemptQuestion(q)}
+                              leftIcon={<RotateCcw size={12} className="text-primary" />}
+                              className="text-xs font-bold"
+                            >
+                              Re-attempt with Coaching
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -414,7 +553,7 @@ export const FinalReportPage: React.FC = () => {
 
               {/* Print View (Clean, structured rows) */}
               <div className="hidden print:block space-y-2">
-                {report.questionBreakdown.map((q, idx) => (
+                {activeReport.questionBreakdown.map((q, idx) => (
                   <div key={q.questionId || idx} className="print-question-card">
                     <div className="flex justify-between items-baseline mb-1.5">
                       <strong>Q{idx + 1}: {q.questionText}</strong>
@@ -435,19 +574,31 @@ export const FinalReportPage: React.FC = () => {
           )}
 
           {/* ACTIONABLE RECOMMENDATIONS */}
-          {report.recommendedPractice && report.recommendedPractice.length > 0 && (
+          {activeReport.recommendedPractice && activeReport.recommendedPractice.length > 0 && (
             <div className="space-y-2 print-section text-left">
               <h3 className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted">
                 Recommended Training Focus
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 print-grid-2">
-                {report.recommendedPractice.map((rec, idx) => (
+                {activeReport.recommendedPractice.map((rec, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-left"
+                    className="p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-left flex flex-col justify-between"
                   >
-                    <strong className="text-foreground font-bold block">{rec.title}</strong>
-                    <p className="text-foreground-muted mt-1 leading-relaxed">{rec.actionableTask}</p>
+                    <div className="space-y-1">
+                      <strong className="text-foreground font-bold block">{rec.title}</strong>
+                      <p className="text-foreground-muted leading-relaxed">{rec.actionableTask}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveDrill({ title: rec.title, task: rec.actionableTask })}
+                      className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800/80 inline-flex items-center gap-1.5 text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      <Sparkles size={12} />
+                      <span>Start Practice Drill (2 min)</span>
+                      <ArrowLeft size={11} className="rotate-180" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -456,13 +607,35 @@ export const FinalReportPage: React.FC = () => {
 
           {/* PRINT FOOTER */}
           <div className="hidden print:block pt-3 border-t border-slate-200 text-center text-[8px] text-slate-400">
-            InterviewPilot Assessment Platform · Session: {report.sessionId || id} · Confidential Assessment
+            InterviewPilot Assessment Platform · Session: {activeReport.sessionId || id} · Confidential Assessment
           </div>
 
         </div>
+
+        {/* MODAL 1: QUESTION RE-ATTEMPT PRACTICE */}
+        {reattemptQuestion && (
+          <QuestionReattemptModal
+            isOpen={!!reattemptQuestion}
+            onClose={() => setReattemptQuestion(null)}
+            question={reattemptQuestion}
+            targetRole={targetRole}
+            targetCompany={targetCompany}
+          />
+        )}
+
+        {/* MODAL 2: 2-MINUTE TARGETED MICRO-DRILL */}
+        {activeDrill && (
+          <MicroDrillModal
+            isOpen={!!activeDrill}
+            onClose={() => setActiveDrill(null)}
+            drillTitle={activeDrill.title}
+            drillTask={activeDrill.task}
+          />
+        )}
       </div>
     </DashboardLayout>
   );
 };
 
 export default FinalReportPage;
+

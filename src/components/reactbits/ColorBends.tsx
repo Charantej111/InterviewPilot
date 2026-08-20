@@ -208,7 +208,8 @@ export const ColorBends: React.FC<ColorBendsProps> = ({
     renderer.domElement.style.display = 'block';
     container.appendChild(renderer.domElement);
 
-    const clock = new THREE.Clock();
+    let lastTime = performance.now();
+    const startTime = lastTime;
 
     const handleResize = () => {
       if (!container) return;
@@ -229,8 +230,10 @@ export const ColorBends: React.FC<ColorBendsProps> = ({
     }
 
     const loop = () => {
-      const dt = clock.getDelta();
-      const elapsed = clock.elapsedTime;
+      const now = performance.now();
+      const dt = Math.max(0.001, Math.min(0.1, (now - lastTime) / 1000));
+      lastTime = now;
+      const elapsed = (now - startTime) / 1000;
       material.uniforms.uTime.value = elapsed;
 
       const deg = (rotationRef.current % 360) + autoRotateRef.current * elapsed;

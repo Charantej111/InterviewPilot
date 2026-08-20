@@ -1,23 +1,53 @@
 // ─── Evidence Infrastructure ─────────────────────────────────────────────────
 
 /**
- * Confidence is CALCULATED from evidence quality — not copied verbatim from AI output.
+ * Confidence is CALCULATED from evidence quality and verification — not copied verbatim from AI output.
  *
- * high     : Exact source phrase + clear section + unambiguous meaning
- * medium   : Source exists + meaning requires interpretation
- * low      : Weak source + ambiguous interpretation
- * inferred : No explicit statement — AI inference only (Level 5 in source hierarchy)
+ * high     : Exact source phrase + clear section + unambiguous meaning + verified in document
+ * medium   : Source exists + meaning requires interpretation / fuzzy matched
+ * low      : Weak source + ambiguous interpretation / minor discrepancy
+ * inferred : No explicit statement — AI inference only (MUST be confirmed by candidate)
  */
 export type EvidenceConfidence = 'high' | 'medium' | 'low' | 'inferred';
 
 export interface EvidenceItem {
   value: string;
-  sourceText: string;       // exact phrase or sentence from the resume
+  sourceText: string;       // exact supporting phrase or sentence from the resume
   sourceLocation: {
-    section: string;        // e.g. 'EXPERIENCE' | 'PROJECTS' | 'SKILLS' | 'EDUCATION'
+    section: string;        // e.g. 'EXPERIENCE' | 'PROJECTS' | 'SKILLS' | 'EDUCATION' | 'HEADER' | 'ACHIEVEMENTS'
     approximateLine?: number;
   };
   confidence: EvidenceConfidence;
+}
+
+// ─── Document Extraction & Section Types ──────────────────────────────────────
+
+export interface ExtractedSection {
+  name: string;
+  normalizedName:
+    | 'header'
+    | 'summary'
+    | 'experience'
+    | 'projects'
+    | 'education'
+    | 'skills'
+    | 'certifications'
+    | 'achievements'
+    | 'other';
+  text: string;
+  startOffset: number;
+  endOffset: number;
+}
+
+export interface ExtractedDocument {
+  rawText: string;
+  normalizedText: string;
+  sections: ExtractedSection[];
+  pageCount?: number;
+  characterCount: number;
+  documentType: DocumentType;
+  documentQuality: DocumentQuality;
+  extractionWarnings: string[];
 }
 
 // ─── Document Classification Gate (deterministic — no AI call) ────────────────
@@ -32,7 +62,7 @@ export type DocumentType =
 
 export type DocumentQuality =
   | 'good'        // name + experience/projects + skills present
-  | 'partial'     // some sections missing but usable
+  | 'partial'     // some sections missing but usable (e.g. student resume with projects + education)
   | 'poor'        // minimal content
   | 'unreadable'; // <150 chars extracted, scanned image, or corrupted
 
@@ -51,29 +81,30 @@ export interface DocumentClassification {
 export interface WorkExperienceEvidence {
   company: EvidenceItem;
   role: EvidenceItem;
-  startDate: EvidenceItem;
-  endDate: EvidenceItem;
+  startDate?: EvidenceItem;
+  endDate?: EvidenceItem;
   bullets: EvidenceItem[];  // each bullet individually extracted with sourceText
 }
 
 export interface ProjectEvidence {
   name: EvidenceItem;
-  problem: EvidenceItem | null;        // null if not found in resume
-  contribution: EvidenceItem | null;   // null if not found
+  problem?: EvidenceItem;        // null/undefined if not found in resume
+  contribution?: EvidenceItem;   // null/undefined if not found
   technologies: EvidenceItem[];
-  outcomes: EvidenceItem[];            // metrics, results — often missing → []
+  outcomes: EvidenceItem[];      // metrics, results — often missing → []
 }
 
 export interface CandidateEvidenceModel {
   identity: {
-    name: EvidenceItem;
+    name?: EvidenceItem;
     email?: EvidenceItem;
-    role?: EvidenceItem;   // current/target role if explicitly stated
+    phone?: EvidenceItem;
+    role?: EvidenceItem;         // current/target role if explicitly stated
   };
   education: {
-    degree: EvidenceItem;
-    institution: EvidenceItem;
-    year: EvidenceItem;
+    degree?: EvidenceItem;
+    institution?: EvidenceItem;
+    year?: EvidenceItem;
   }[];
   workExperience: WorkExperienceEvidence[];
   projects: ProjectEvidence[];
@@ -83,6 +114,7 @@ export interface CandidateEvidenceModel {
     domain: EvidenceItem[];
   };
   certifications: EvidenceItem[];
+  achievements: EvidenceItem[];
   /**
    * Text found in resume that could not be confidently categorized.
    * Shown to candidate during review step for clarification.
@@ -92,6 +124,48 @@ export interface CandidateEvidenceModel {
     reason: string;
   }[];
 }
+
+// ─── Evidence Validation Types ────────────────────────────────────────────────
+
+export interface ValidationIssue {
+  type:
+    | 'missing_source'
+    | 'unsupported_value'
+    | 'duplicate'
+    | 'invalid_date'
+    | 'conflicting_evidence'
+    | 'low_confidence';
+  severity: 'warning' | 'error';
+  field: string;
+  message: string;
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  model: CandidateEvidenceModel;
+  issues: ValidationIssue[];
+  repairedFields: string[];
+  evidenceQualitySummary: {
+    totalItems: number;
+    supportedCount: number;
+    partiallySupportedCount: number;
+    unsupportedCount: number;
+    highConfidenceCount: number;
+    mediumConfidenceCount: number;
+    lowConfidenceCount: number;
+    inferredCount: number;
+  };
+}
+
+export type ExtractionErrorCode =
+  | 'AI_REQUEST_FAILED'
+  | 'AI_RATE_LIMITED'
+  | 'AI_TIMEOUT'
+  | 'AI_INVALID_OUTPUT'
+  | 'INSUFFICIENT_CONTEXT'
+  | 'DOCUMENT_UNREADABLE'
+  | 'DOCUMENT_NOT_RESUME'
+  | 'EVIDENCE_VALIDATION_FAILED';
 
 // ─── Locked Candidate Context ────────────────────────────────────────────────
 
@@ -159,4 +233,5 @@ export interface ResumeData {
   uploadDate: string;
   parsingStatus: 'idle' | 'uploading' | 'processing' | 'completed' | 'error';
   extractedInfo?: CandidateProfile;
+  evidenceModel?: CandidateEvidenceModel;
 }

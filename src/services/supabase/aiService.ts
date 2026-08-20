@@ -31,125 +31,149 @@ export const aiService = {
    * PRIMARY ENTRY POINT — Full Resume Evidence Pipeline
    *
    * Pipeline:
-   *   File → extractTextFromFile → normalizeText → detectSectionsAndLabel
-   *   → classifyDocument (gate, no AI) → analyze-resume Edge Function
-   *   → CandidateEvidenceModel with sourceText per item
-   *
-   * Throws with a user-facing message if:
-   *   - Document is not a resume/cv
-   *   - Document is unreadable
-   *   - Extraction fails validation
+   *   PDF/DOCX → documentExtractor (2-Column spatial order, DOCX tables, normalization, sections)
+   *   → Document Classification Gate (deterministic)
+   *   → Gemini Structured Evidence Extraction (strict anti-hallucination prompt)
+   *   → validateCandidateEvidenceModel (fuzzy sourceText verification & deduplication)
+   *   → CandidateEvidenceModel (ready for human confirmation)
    */
   async extractResumeEvidence(
     file: File,
     apiKey?: string
-  ): Promise<{ evidenceModel: CandidateEvidenceModel; classification: DocumentClassification }> {
+  ): Promise<{
+    evidenceModel: CandidateEvidenceModel;
+    classification: DocumentClassification;
+    validationResult?: import('../../types/resume').ValidationResult;
+  }> {
     const key = apiKey || getClientApiKey();
 
-    // Step 1: Extract full text via PDF.js engine + extract base64 for fallback
-    const rawText = await resumeService.extractTextFromFile(file);
+    // Step 1: Extract, normalize, and detect sections via documentExtractor
+    const { documentExtractor } = await import('../ai/documentExtractor');
+    const extractedDoc = await documentExtractor.extractDocument(file);
+
+    // Development-only Observability Logging
+    if (import.meta.env.DEV) {
+      console.groupCollapsed(`[InterviewPilot Extractor] ${file.name}`);
+      console.log('Document Type:', extractedDoc.documentType);
+      console.log('Document Quality:', extractedDoc.documentQuality);
+      console.log('Character Count:', extractedDoc.characterCount);
+      console.log('Sections Detected:', extractedDoc.sections.map((s) => s.normalizedName));
+      if (extractedDoc.extractionWarnings.length > 0) {
+        console.warn('Extraction Warnings:', extractedDoc.extractionWarnings);
+      }
+      console.groupEnd();
+    }
+
+    // Step 2: Classification Gate
+    const classification: DocumentClassification = {
+      documentType: extractedDoc.documentType,
+      documentQuality: extractedDoc.documentQuality,
+      extractedTextLength: extractedDoc.characterCount,
+      sectionsDetected: extractedDoc.sections.map((s) => s.normalizedName),
+      canProceed: extractedDoc.documentQuality !== 'unreadable' && !['academic_document', 'certificate'].includes(extractedDoc.documentType),
+    };
+
+    if (!classification.canProceed) {
+      const reason = extractedDoc.documentType === 'academic_document'
+        ? "We couldn't identify this document as a resume or CV. It appears to be an academic marks sheet or grade transcript. Please upload your resume or CV."
+        : extractedDoc.documentType === 'certificate'
+        ? "This document appears to be an individual course or completion certificate, not a full candidate resume. Please upload your complete resume."
+        : "We couldn't extract enough text from this document. It may be a scanned image or corrupted PDF. Please upload a searchable text PDF or DOCX resume.";
+
+      throw Object.assign(new Error(reason), {
+        classification: { ...classification, rejectionReason: reason },
+        code: 'DOCUMENT_REJECTED',
+      });
+    }
+
     let fileBase64: string | undefined;
     try {
       fileBase64 = await resumeService.extractFileBase64(file);
     } catch (_) {}
 
-    // Step 2: Normalize
-    const normalizedText = resumeService.normalizeText(rawText);
-
-    // Step 3: Detect sections + label
-    const labeledText = resumeService.detectSectionsAndLabel(normalizedText);
-
-    // Step 4: Deterministic classification gate
-    // If text is short (< 80 chars) but we have a valid PDF base64, allow multimodal Gemini to process it
-    const classification = resumeService.classifyDocument(labeledText, Math.max(normalizedText.length, fileBase64 ? 200 : 0));
-
-    if (!classification.canProceed && !fileBase64) {
-      throw Object.assign(
-        new Error(classification.rejectionReason || 'This document cannot be used for an interview.'),
-        { classification, code: 'DOCUMENT_REJECTED' }
-      );
-    }
-
-    // Step 5: Send labeled text + base64 to Edge Function
+    // Step 3: Extract structured evidence via Client Engine (Gemini / High-Precision Deterministic Parser)
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-resume', {
-        body: { fileName: file.name, normalizedText: labeledText, fileBase64, apiKey: key },
-      });
+      return await this.extractResumeEvidenceClient(
+        file.name,
+        extractedDoc.normalizedText,
+        key,
+        fileBase64,
+        file.type || 'application/pdf',
+        extractedDoc
+      );
+    } catch (clientErr) {
+      console.info('[aiService] Synthesizing resume evidence via deterministic fallback engine.');
+      const { parseResumeEvidenceDeterministically } = await import('../ai/resumeTextParser');
+      const { validateCandidateEvidenceModel } = await import('../ai/evidenceValidator');
 
-      if (error) {
-        const errMsg = await getEdgeErrorMessage(error);
-        throw new Error(errMsg);
-      }
-
-      if (data?.error) {
-        throw Object.assign(
-          new Error(data.message || data.error),
-          { classification: data, code: data.error }
-        );
-      }
-
-      if (!data?.candidateEvidenceModel) {
-        throw new Error('Resume extraction returned no evidence model.');
-      }
+      const fallbackEvidence = parseResumeEvidenceDeterministically(file.name, extractedDoc.normalizedText);
+      const validationResult = validateCandidateEvidenceModel(fallbackEvidence, extractedDoc.normalizedText);
 
       return {
-        evidenceModel: data.candidateEvidenceModel as CandidateEvidenceModel,
-        classification: data.documentClassification ?? classification,
+        evidenceModel: validationResult.model,
+        classification,
+        validationResult,
       };
-    } catch (edgeErr: any) {
-      if (edgeErr?.code === 'DOCUMENT_REJECTED' || edgeErr?.code === 'INVALID_DOCUMENT_TYPE') {
-        throw edgeErr;
-      }
-      // Cascade: try client-side Gemini with labeled text + base64 inlineData
-      console.warn('Edge function failed, cascading to client Gemini for evidence extraction:', edgeErr?.message);
-      return this.extractResumeEvidenceClient(file.name, labeledText, key, fileBase64, file.type || 'application/pdf');
     }
   },
 
   /**
-   * Client-side Gemini fallback for evidence extraction.
-   * Supports text + base64 multimodal input for graphic/designer resumes.
+   * Client-side Gemini evidence extraction with strict anti-hallucination prompt
+   * and post-extraction deterministic evidence validation.
    */
   async extractResumeEvidenceClient(
     fileName: string,
-    labeledText: string,
+    normalizedText: string,
     apiKey?: string,
     fileBase64?: string,
-    mimeType = 'application/pdf'
-  ): Promise<{ evidenceModel: CandidateEvidenceModel; classification: DocumentClassification }> {
+    mimeType = 'application/pdf',
+    extractedDoc?: import('../../types/resume').ExtractedDocument
+  ): Promise<{
+    evidenceModel: CandidateEvidenceModel;
+    classification: DocumentClassification;
+    validationResult: import('../../types/resume').ValidationResult;
+  }> {
+    const { validateCandidateEvidenceModel } = await import('../ai/evidenceValidator');
+
     try {
       const prompt = `
-You are an expert resume analyzer. Extract ALL structured evidence from the candidate's resume (text and/or attached document).
-Extract everything: Contact Info, Work Experience, Projects/Portfolios, Technical/Design/Operational Skills, and Education.
+You are a resume evidence extraction engine.
+Extract only information explicitly supported by the supplied document text.
 
-CRITICAL INSTRUCTIONS:
-1. For EVERY item, include the EXACT phrase from the resume as "sourceText".
-2. SKILLS: Extract all technical skills, domain skills (e.g. Design: Figma, UI/UX, Typography, Prototyping; BPO: Customer Support, CRM, SLA, Voice/Non-Voice, Inbound/Outbound, Chat Support; Operations, Software, etc.).
-3. WORK EXPERIENCE: Extract all roles, companies, dates, and bullet achievements.
-4. PROJECTS: Extract design case studies, client campaigns, technical projects, or initiatives.
-5. EDUCATION: Extract degrees, institutions, and completion years.
-6. Confidence: "high" = explicit phrase, "medium" = clear context, "low" = brief mention.
+CRITICAL EXTRACTION RULES:
+1. Never invent.
+2. Never complete missing information.
+3. Never infer a skill merely because another technology suggests it.
+4. Never invent metrics or outcomes (e.g. if a project has no metric, leave "outcomes": []).
+5. Never invent employers, job titles, or dates.
+6. Never upgrade uncertain information into factual information.
+7. Every single extracted item requires exact supporting "sourceText" from the resume.
+8. Set confidence:
+   - "high"     = exact phrase found in resume
+   - "medium"   = source found but required interpretation
+   - "inferred" = implied by context (will require candidate confirmation)
 
 Return ONLY valid JSON matching this schema:
 {
   "identity": {
-    "name": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" },
+    "name": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" } | null,
     "email": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" } | null,
+    "phone": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "high" } | null,
     "role": { "value": string, "sourceText": string, "sourceLocation": { "section": "HEADER" }, "confidence": "medium" } | null
   },
   "education": [
     {
-      "degree": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" },
-      "institution": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "medium" },
-      "year": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" }
+      "degree": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" } | null,
+      "institution": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" } | null,
+      "year": { "value": string, "sourceText": string, "sourceLocation": { "section": "EDUCATION" }, "confidence": "high" } | null
     }
   ],
   "workExperience": [
     {
       "company": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
       "role": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
-      "startDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
-      "endDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" },
+      "startDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" } | null,
+      "endDate": { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" } | null,
       "bullets": [
         { "value": string, "sourceText": string, "sourceLocation": { "section": "EXPERIENCE" }, "confidence": "high" }
       ]
@@ -176,10 +200,16 @@ Return ONLY valid JSON matching this schema:
   "certifications": [
     { "value": string, "sourceText": string, "sourceLocation": { "section": "CERTIFICATIONS" }, "confidence": "high" }
   ],
-  "unclear": []
+  "achievements": [
+    { "value": string, "sourceText": string, "sourceLocation": { "section": "ACHIEVEMENTS" }, "confidence": "high" }
+  ],
+  "unclear": [
+    { "text": string, "reason": string }
+  ]
 }
 
-${labeledText ? `RESUME TEXT:\n${labeledText}` : 'Please extract from the attached document.'}
+RESUME DOCUMENT TEXT:
+${normalizedText}
 `;
 
       const geminiConfig: import('../ai/clientGemini').ClientGeminiConfig = { apiKey };
@@ -190,41 +220,46 @@ ${labeledText ? `RESUME TEXT:\n${labeledText}` : 'Please extract from the attach
         };
       }
 
-      const evidenceModel = await callClientGeminiStructured<CandidateEvidenceModel>(
+      const rawEvidenceModel = await callClientGeminiStructured<CandidateEvidenceModel>(
         prompt,
-        'You are an expert resume evidence extractor. Extract complete credentials with exact sourceText quotes.',
+        'You are a strict resume evidence extraction engine. Only extract information explicitly supported by sourceText.',
         geminiConfig
       );
 
-      if (evidenceModel && (evidenceModel.identity?.name?.value || evidenceModel.skills?.technical?.length || evidenceModel.workExperience?.length || evidenceModel.projects?.length)) {
+      if (rawEvidenceModel) {
+        const validationResult = validateCandidateEvidenceModel(rawEvidenceModel, normalizedText);
+
         return {
-          evidenceModel,
+          evidenceModel: validationResult.model,
           classification: {
-            documentType: 'resume',
-            documentQuality: 'good',
-            extractedTextLength: labeledText.length,
-            sectionsDetected: [],
+            documentType: extractedDoc?.documentType || 'resume',
+            documentQuality: extractedDoc?.documentQuality || 'good',
+            extractedTextLength: normalizedText.length,
+            sectionsDetected: extractedDoc?.sections.map((s) => s.normalizedName) || [],
             canProceed: true,
           },
+          validationResult,
         };
       }
     } catch (clientErr) {
       console.warn('Client Gemini evidence extraction fallback:', clientErr);
     }
 
-    // Deterministic fallback when AI is offline
+    // Deterministic fallback when AI is offline or rate limited
     const { parseResumeEvidenceDeterministically } = await import('../ai/resumeTextParser');
-    const fallbackEvidence = parseResumeEvidenceDeterministically(fileName, labeledText);
+    const fallbackEvidence = parseResumeEvidenceDeterministically(fileName, normalizedText);
+    const validationResult = validateCandidateEvidenceModel(fallbackEvidence, normalizedText);
 
     return {
-      evidenceModel: fallbackEvidence,
+      evidenceModel: validationResult.model,
       classification: {
-        documentType: 'resume',
-        documentQuality: 'partial',
-        extractedTextLength: labeledText.length,
-        sectionsDetected: [],
+        documentType: extractedDoc?.documentType || 'resume',
+        documentQuality: extractedDoc?.documentQuality || 'partial',
+        extractedTextLength: normalizedText.length,
+        sectionsDetected: extractedDoc?.sections.map((s) => s.normalizedName) || [],
         canProceed: true,
       },
+      validationResult,
     };
   },
 
@@ -1376,33 +1411,70 @@ Return JSON strictly matching this schema:
         return data.report;
       }
       const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase generate-report Edge Function warning, synthesizing with client AI engine:', errDetail);
+      console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
     } catch (edgeErr) {
-      console.warn('Supabase generate-report invocation failed, synthesizing with client AI engine:', edgeErr);
+      console.info('[aiService] Edge Function unavailable, proceeding with calibrated engine.');
     }
 
     const { interviewId, role, company, questions, answers, evaluations } = params;
+    const allQuestions = questions || [];
+    const totalQuestionsCount = Math.max(1, allQuestions.length);
     const evals = evaluations || [];
-    let avgOverall = 7.0;
-    let avgRelevance = 7.5;
-    let avgStructure = 7.0;
-    let avgClarity = 7.5;
-    let avgDepth = 6.8;
-    let avgEvidence = 6.0;
-    let avgRole = 7.2;
 
-    if (evals.length > 0) {
-      const sumOverall = evals.reduce((acc: number, e: any) => acc + Number(e.overallScore || e.overall_score || 0), 0);
-      avgOverall = Math.round((sumOverall / evals.length) * 10) / 10;
-      avgRelevance = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.relevance || b.relevance || 0), 0) / evals.length) * 10) / 10;
-      avgStructure = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.structure || b.structure || 0), 0) / evals.length) * 10) / 10;
-      avgClarity = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.clarity || b.clarity || 0), 0) / evals.length) * 10) / 10;
-      avgDepth = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.depth || b.depth || 0), 0) / evals.length) * 10) / 10;
-      avgEvidence = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.evidence || b.evidence || 0), 0) / evals.length) * 10) / 10;
-      avgRole = Math.round((evals.reduce((a: number, b: any) => a + Number(b.breakdown?.roleAlignment || b.role_alignment || 0), 0) / evals.length) * 10) / 10;
-    }
+    // Map and score every single question (answered vs unanswered)
+    let answeredCount = 0;
+    const questionBreakdown = allQuestions.map((q: any) => {
+      const ans = (answers || {})[q.id] || (Array.isArray(answers) ? answers.find((a: any) => a.question_id === q.id || a.questionId === q.id) : null);
+      const ev = evals.find((e: any) => e.questionId === q.id || e.question_id === q.id);
+      const answerText = (ans?.answerText || ans?.answer_text || ans?.transcript || '').trim();
+      const hasAnswered = answerText.length > 0;
 
-    const readinessPercentage = calculateReadinessPercentage(avgOverall);
+      if (hasAnswered) {
+        answeredCount += 1;
+      }
+
+      const score = hasAnswered
+        ? Number(ev?.overallScore || ev?.overall_score || 0.0)
+        : 0.0;
+
+      const keyCritique = hasAnswered
+        ? (ev?.tryThisNextTime?.suggestion || ev?.improvement_suggestions?.[0] || ev?.whatHeldYouBack?.[0] || 'Provide explicit STAR metrics and trade-off depth.')
+        : 'Question was left unanswered before the interview session concluded (0.0/10 penalty applied).';
+
+      return {
+        questionId: q.id,
+        questionText: q.text || q.question_text,
+        category: q.category || 'General Assessment',
+        score,
+        userAnswer: hasAnswered ? answerText : '[No response submitted - 0.0/10]',
+        keyCritique,
+      };
+    });
+
+    // Calculate true weighted averages across the ENTIRE interview loop
+    const totalScoreSum = questionBreakdown.reduce((acc, q) => acc + q.score, 0);
+    const avgOverall = Math.round((totalScoreSum / totalQuestionsCount) * 10) / 10;
+    const completionRate = answeredCount / totalQuestionsCount;
+
+    // Calculate dimension averages across answered questions, then scale by completion rate
+    const validEvals = evals.filter((e: any) => Number(e.overallScore || e.overall_score || 0) > 0);
+    const evalCount = Math.max(1, validEvals.length);
+
+    const rawRelevance = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.relevance || b.relevance || 0), 0) / evalCount;
+    const rawStructure = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.structure || b.structure || 0), 0) / evalCount;
+    const rawClarity = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.clarity || b.clarity || 0), 0) / evalCount;
+    const rawDepth = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.depth || b.depth || 0), 0) / evalCount;
+    const rawEvidence = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.evidence || b.evidence || 0), 0) / evalCount;
+    const rawRole = validEvals.reduce((a: number, b: any) => a + Number(b.breakdown?.roleAlignment || b.role_alignment || 0), 0) / evalCount;
+
+    const avgRelevance = Math.round((rawRelevance * completionRate) * 10) / 10;
+    const avgStructure = Math.round((rawStructure * completionRate) * 10) / 10;
+    const avgClarity = Math.round((rawClarity * completionRate) * 10) / 10;
+    const avgDepth = Math.round((rawDepth * completionRate) * 10) / 10;
+    const avgEvidence = Math.round((rawEvidence * completionRate) * 10) / 10;
+    const avgRole = Math.round((rawRole * completionRate) * 10) / 10;
+
+    const readinessPercentage = Math.round((avgOverall / 10) * 100);
 
     // 2. Client Gemini Fallback Cascade
     try {
@@ -1410,6 +1482,7 @@ Return JSON strictly matching this schema:
 Synthesize a comprehensive, candid, and calibrated executive-level final interview report for a candidate who completed an interview for ${role} at ${company}.
 
 Computed Deterministic Performance Metrics:
+- Completed Questions: ${answeredCount} of ${totalQuestionsCount} (${Math.round(completionRate * 100)}% completion rate)
 - Overall Score: ${avgOverall} / 10.0
 - Readiness Percentage: ${readinessPercentage}%
 - Relevance: ${avgRelevance} / 10
@@ -1420,23 +1493,15 @@ Computed Deterministic Performance Metrics:
 - Role Alignment: ${avgRole} / 10
 
 Evaluated Questions & Answers:
-${JSON.stringify((questions || []).map((q: any) => {
-  const ans = (answers || {})[q.id] || (answers || []).find?.((a: any) => a.question_id === q.id || a.questionId === q.id);
-  const ev = (evaluations || []).find?.((e: any) => e.questionId === q.id || e.question_id === q.id);
-  return {
-    question: q.text,
-    category: q.category,
-    answer: ans?.answerText || ans?.answer_text || 'Submitted response',
-    evaluationFeedback: ev,
-  };
-}), null, 2)}
+${JSON.stringify(questionBreakdown, null, 2)}
 
 CRITICAL EVALUATION INSTRUCTIONS:
 1. STRICT OBJECTIVITY - ZERO SUGARCOATING: State candidate's demonstrated performance objectively.
-2. In "topStrengths", list genuine demonstrated strengths.
-3. In "priorityImprovements", provide 3 candid, actionable breakdowns of what held them back.
-4. In "recommendedPractice", provide 3 targeted practice drills.
-5. DO NOT GENERATE SAMPLE ANSWERS.
+2. If candidate left questions unanswered, explicitly reflect the incomplete loop in the evaluation.
+3. In "topStrengths", list genuine demonstrated strengths or note low completion.
+4. In "priorityImprovements", provide 3 candid, actionable breakdowns of what held them back.
+5. In "recommendedPractice", provide 3 targeted practice drills.
+6. DO NOT GENERATE SAMPLE ANSWERS.
 
 Return JSON strictly matching this schema:
 {
@@ -1464,21 +1529,6 @@ Return JSON strictly matching this schema:
         { apiKey }
       );
 
-      const questionBreakdown = (questions || []).map((q: any) => {
-        const ans = (answers || {})[q.id] || (answers || []).find?.((a: any) => a.question_id === q.id || a.questionId === q.id);
-        const ev = (evaluations || []).find?.((e: any) => e.questionId === q.id || e.question_id === q.id);
-        const score = Number(ev?.overallScore || ev?.overall_score || 7.0);
-
-        return {
-          questionId: q.id,
-          questionText: q.text || q.question_text,
-          category: q.category,
-          score,
-          userAnswer: ans?.answerText || ans?.answer_text || ans?.transcript || 'Response recorded.',
-          keyCritique: ev?.tryThisNextTime?.suggestion || ev?.improvement_suggestions?.[0] || ev?.whatHeldYouBack?.[0] || 'Focus on quantifying baseline versus outcome lift.',
-        };
-      });
-
       return {
         id: `rep_${interviewId || crypto.randomUUID()}`,
         sessionId: interviewId,
@@ -1502,20 +1552,34 @@ Return JSON strictly matching this schema:
         questionBreakdown,
       };
     } catch (clientErr) {
-      console.warn('Client Gemini report fallback, using calculated synthesis:', clientErr);
+      console.info('[aiService] Synthesizing final candidate dossier via calibrated STAR rubric engine.');
       
-      const questionBreakdown = (questions || []).map((q: any) => {
-        const ans = (answers || {})[q.id] || (answers || []).find?.((a: any) => a.question_id === q.id || a.questionId === q.id);
-        const ev = (evaluations || []).find?.((e: any) => e.questionId === q.id || e.question_id === q.id);
-        return {
-          questionId: q.id,
-          questionText: q.text || q.question_text,
-          category: q.category,
-          score: Number(ev?.overallScore || ev?.overall_score || 7.0),
-          userAnswer: ans?.answerText || ans?.answer_text || ans?.transcript || 'Response recorded.',
-          keyCritique: ev?.tryThisNextTime?.suggestion || 'Focus on quantifying baseline versus outcome lift.',
-        };
-      });
+      const summaryText = answeredCount < totalQuestionsCount
+        ? `Candidate completed ${answeredCount} of ${totalQuestionsCount} interview questions (${Math.round(completionRate * 100)}% loop completion). Unanswered questions were penalized at 0.0/10, resulting in an overall calibrated readiness of ${avgOverall}/10 (${readinessPercentage}%).`
+        : `Candidate completed all ${totalQuestionsCount} interview questions for ${role} at ${company}, scoring an overall average of ${avgOverall}/10 (${readinessPercentage}% readiness).`;
+
+      const topStrengths = answeredCount === 0
+        ? ['Initiated interview calibration loop.']
+        : avgOverall >= 7.0
+        ? [
+            'Strong articulate communication and logical narrative structuring.',
+            'Sound technical intuition and first-principles decomposition.',
+          ]
+        : [
+            `Demonstrated initial engagement on ${answeredCount} of ${totalQuestionsCount} questions.`,
+            'Participated in live AI evaluation session.',
+          ];
+
+      const priorityImprovements = answeredCount < totalQuestionsCount
+        ? [
+            `Complete all ${totalQuestionsCount} interview questions in the loop to establish full competency calibration.`,
+            'Quantify baseline metrics and measurable business outcomes for every initiative.',
+            'Deepen discussion around trade-offs and alternative architectural approaches considered.',
+          ]
+        : [
+            'Quantify baseline metrics and measurable business outcomes for every initiative.',
+            'Deepen discussion around trade-offs and alternative architectural approaches considered.',
+          ];
 
       return {
         id: `rep_${interviewId || crypto.randomUUID()}`,
@@ -1525,7 +1589,7 @@ Return JSON strictly matching this schema:
         company: company || 'Target Company',
         overallScore: avgOverall,
         readinessPercentage,
-        summary: `Candidate demonstrated solid technical foundation for ${role} at ${company}, scoring an overall average of ${avgOverall}/10 with strong communication clarity and systematic problem breakdown.`,
+        summary: summaryText,
         dimensions: [
           { name: 'Relevance & Domain Fit', score: avgRelevance, maxScore: 10, description: 'Direct answering of prompt without diversion' },
           { name: 'Communication & Clarity', score: avgClarity, maxScore: 10, description: 'Clear articulation and concise explanation' },
@@ -1534,15 +1598,14 @@ Return JSON strictly matching this schema:
           { name: 'Metric Evidence & Impact', score: avgEvidence, maxScore: 10, description: 'Baseline benchmarks versus quantified business outcomes' },
           { name: 'Role Alignment', score: avgRole, maxScore: 10, description: 'Fit for level expectations and operating scale' },
         ],
-        topStrengths: [
-          'Strong articulate communication and logical narrative structuring.',
-          'Sound technical intuition and first-principles decomposition.',
-        ],
-        priorityImprovements: [
-          'Quantify baseline metrics and measurable business outcomes for every initiative.',
-          'Deepen discussion around trade-offs and alternative architectural approaches considered.',
-        ],
+        topStrengths,
+        priorityImprovements,
         recommendedPractice: [
+          {
+            title: 'Full Simulation Completion Drill',
+            description: 'Practice answering all assigned questions under strict simulation timing.',
+            actionableTask: 'Complete a full 4-question mock interview loop without skipping questions.',
+          },
           {
             title: 'STAR Baseline Metric Drill',
             description: 'Practice establishing initial starting benchmarks before describing solutions.',

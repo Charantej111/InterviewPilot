@@ -99,7 +99,15 @@ export const App: React.FC = () => {
                 }
               />
 
-              {/* User Settings */}
+              {/* User Settings & Profile */}
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <SettingsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/settings"
                 element={

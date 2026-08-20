@@ -4,6 +4,7 @@ import {
   Question, 
   CandidateAnswer, 
   QuestionFeedback, 
+  FinalReport,
   InterviewType, 
   InterviewDifficulty, 
   InterviewDuration,
@@ -12,6 +13,7 @@ import {
   VoiceStatus,
 } from '../../types/interview';
 import { Json } from '../../types/database.types';
+import { evaluationService } from './evaluationService';
 
 export interface CreateInterviewParams {
   userId: string;
@@ -176,9 +178,9 @@ export const interviewService = {
       .from('interviews')
       .select(`
         *,
-        questions (*),
-        answers (*),
-        evaluations (*)
+        questions:questions!questions_interview_id_fkey (*),
+        answers:answers!answers_interview_id_fkey (*),
+        evaluations:evaluations!evaluations_interview_id_fkey (*)
       `)
       .eq('id', sessionId)
       .eq('user_id', userId)
@@ -444,5 +446,104 @@ export const interviewService = {
 
     if (error || !data) return null;
     return this.getSessionById(userId, data.id);
+  },
+
+  /**
+   * Idempotent server-authoritative interview completion and report synthesis pipeline.
+   */
+  async completeInterview(params: {
+    userId: string;
+    interviewId: string;
+    finalAnswer?: {
+      questionId: string;
+      answerText: string;
+      inputMode: 'text' | 'voice';
+      durationSeconds: number;
+    };
+    idempotencyKey?: string;
+    isTimeout?: boolean;
+  }): Promise<{ status: InterviewSession['status']; report?: FinalReport }> {
+    const { userId, interviewId, finalAnswer, idempotencyKey, isTimeout } = params;
+
+    // 1. Try Supabase complete-interview Edge Function
+    try {
+      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY || '';
+      const { data, error } = await supabase.functions.invoke('complete-interview', {
+        body: {
+          interviewId,
+          finalAnswer,
+          idempotencyKey: idempotencyKey || crypto.randomUUID(),
+          isTimeout: isTimeout || false,
+          apiKey,
+        },
+      });
+
+      if (!error && data?.report) {
+        return { status: 'report_ready', report: data.report };
+      }
+      if (!error && data?.status) {
+        return { status: data.status, report: data.report };
+      }
+      console.warn('complete-interview Edge Function notice, using client fallback:', error);
+    } catch (edgeErr) {
+      console.warn('complete-interview Edge Function invocation error, using client fallback:', edgeErr);
+    }
+
+    // 2. Client-side authoritative fallback pipeline
+    try {
+      // Step A: Save final answer if provided
+      if (finalAnswer && finalAnswer.questionId && finalAnswer.answerText) {
+        try {
+          await this.submitAnswer(
+            userId,
+            interviewId,
+            finalAnswer.questionId,
+            finalAnswer.answerText,
+            finalAnswer.inputMode,
+            finalAnswer.durationSeconds
+          );
+        } catch (ansErr) {
+          console.warn('Final answer save notice (may already exist):', ansErr);
+        }
+      }
+
+      // Step B: Mark interview completing
+      await supabase
+        .from('interviews')
+        .update({
+          status: 'completing',
+          remaining_time: 0,
+        })
+        .eq('id', interviewId)
+        .eq('user_id', userId);
+
+      // Step C: Mark interview completed
+      await supabase
+        .from('interviews')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', interviewId)
+        .eq('user_id', userId);
+
+      // Step D: Transition to report_generating and synthesize report
+      await supabase
+        .from('interviews')
+        .update({ status: 'report_generating' })
+        .eq('id', interviewId)
+        .eq('user_id', userId);
+
+      const report = await evaluationService.generateAndSaveFinalReport(userId, interviewId);
+      return { status: 'report_ready', report };
+    } catch (err: any) {
+      console.error('Error in client fallback completion pipeline:', err);
+      await supabase
+        .from('interviews')
+        .update({ status: 'report_failed' })
+        .eq('id', interviewId)
+        .eq('user_id', userId);
+      return { status: 'report_failed' };
+    }
   },
 };

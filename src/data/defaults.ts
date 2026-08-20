@@ -17,7 +17,7 @@ export const createDefaultUser = (): UserProfile => ({
   avatarUrl: '',
   targetRole: '',
   targetCompanies: [],
-  experienceLevel: 'Mid-level',
+  experienceLevel: '' as any,
   streakDays: 0,
   lastActiveDate: '',
   interviewsCompleted: 0,

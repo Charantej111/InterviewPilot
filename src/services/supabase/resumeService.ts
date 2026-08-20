@@ -102,24 +102,29 @@ export const resumeService = {
    * Output: Gemini-ready text with [SECTION: X] markers.
    */
   detectSectionsAndLabel(normalizedText: string): string {
+    // 1. Separate inline headers and bullets
+    const text = normalizedText
+      .replace(/\b(PROFILE\s*SUMMARY|PROFESSIONAL\s*SUMMARY|TECHNICAL\s*SKILLS|CORE\s*COMPETENCIES|KEY\s*PROJECTS|PROJECTS|WORK\s*EXPERIENCE|EXPERIENCE|ACHIEVEMENTS(?:\s*\/\s*CERTIFICATIONS)?|CERTIFICATIONS|EDUCATION|ACADEMIC\s*BACKGROUND)\b/gi, '\n$1\n')
+      .replace(/([•\u2022\u25cf\u25cb\u25aa])/g, '\n$1 ');
+
     const sectionPatterns: [RegExp, string][] = [
       [/^(work\s*experience|experience|employment|work\s*history)/im, 'EXPERIENCE'],
       [/^(education|academic|qualifications)/im,                       'EDUCATION'],
       [/^(projects?|personal\s*projects?|key\s*projects?)/im,         'PROJECTS'],
       [/^(skills?|technical\s*skills?|core\s*competencies)/im,        'SKILLS'],
       [/^(certifications?|certificates?|licenses?)/im,                 'CERTIFICATIONS'],
-      [/^(achievements?|awards?|honors?)/im,                           'ACHIEVEMENTS'],
-      [/^(summary|profile|objective|about)/im,                         'SUMMARY'],
+      [/^(achievements?|awards?|honors?|achievements\s*\/\s*certifications)/im, 'ACHIEVEMENTS'],
+      [/^(summary|profile|profile\s*summary|professional\s*summary|objective|about)/im, 'SUMMARY'],
     ];
 
-    const lines = normalizedText.split('\n');
+    const lines = text.split('\n');
     const labeled: string[] = [];
     let currentSection = 'HEADER';
     labeled.push(`[SECTION: ${currentSection}]`);
 
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed) { labeled.push(''); continue; }
+      if (!trimmed) continue;
 
       let matched = false;
       for (const [pattern, sectionName] of sectionPatterns) {
@@ -242,12 +247,15 @@ export const resumeService = {
     const domainSkills = (model.skills?.domain || []).map((s) => s?.value || String(s)).filter(Boolean);
     const allSkills = [...techSkills, ...prodSkills, ...domainSkills];
 
-    const candidateName = model.identity?.name?.value || 'Candidate';
+    const candidateName = (model.identity?.name?.value || 'Candidate')
+      .replace(/\[SECTION:[^\]]*\]/gi, '')
+      .replace(/\[PAGE\s*\d+\]/gi, '')
+      .trim() || 'Candidate';
     const primaryRole = model.workExperience?.[0]?.role?.value;
     const primaryCompany = model.workExperience?.[0]?.company?.value;
     const summary = primaryRole && primaryCompany
       ? `${primaryRole} at ${primaryCompany}`
-      : model.identity?.role?.value || '';
+      : (model.identity?.role?.value || '').replace(/\[SECTION:[^\]]*\]/gi, '').replace(/\[PAGE\s*\d+\]/gi, '').trim();
 
     return {
       name: candidateName,
@@ -271,7 +279,7 @@ export const resumeService = {
       })),
       skills: [...new Set(allSkills)],
       certifications: (model.certifications || []).map((c) => c?.value || String(c)).filter(Boolean),
-      achievements: [],
+      achievements: (model.achievements || []).map((a) => a?.value || String(a)).filter(Boolean),
       strengths: prodSkills.slice(0, 5),
       potentialGaps: (model.unclear || []).map((u) => u?.text || String(u)).filter(Boolean),
     };
@@ -321,8 +329,32 @@ export const resumeService = {
           for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
-            const pageStrings = textContent.items.map((item: any) => item.str || '');
-            extractedPagesText += `\n[PAGE ${pageNum}]\n` + pageStrings.join(' ');
+            
+            let lastY: number | null = null;
+            let pageText = '';
+
+            for (const item of (textContent.items as any[])) {
+              const str = (item.str || '').trim();
+              if (!str) continue;
+
+              const currentY = item.transform ? item.transform[5] : null;
+              const hasEOL = Boolean(item.hasEOL);
+
+              // Detect significant vertical displacement (new line in document layout)
+              if (lastY !== null && currentY !== null && Math.abs(currentY - lastY) > 4) {
+                pageText += '\n' + str;
+              } else if (hasEOL) {
+                pageText += (pageText.endsWith(' ') || pageText.endsWith('\n') ? '' : ' ') + str + '\n';
+              } else {
+                pageText += (pageText.endsWith(' ') || pageText.endsWith('\n') || pageText.length === 0 ? '' : ' ') + str;
+              }
+
+              if (currentY !== null) {
+                lastY = currentY;
+              }
+            }
+
+            extractedPagesText += `\n[PAGE ${pageNum}]\n` + pageText;
           }
 
           const cleanExtracted = extractedPagesText.trim();

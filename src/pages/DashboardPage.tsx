@@ -1,22 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
-import { ReadinessScoreWidget } from '../components/dashboard/ReadinessScoreWidget';
-import { RecentInterviewsTable, InterviewRecord } from '../components/dashboard/RecentInterviewsTable';
-import { Folder } from '../components/reactbits/Folder';
 import { Button } from '../components/ui/Button';
+import { CompetencyRadarWidget } from '../components/dashboard/CompetencyRadarWidget';
+import { ScoreTrajectoryWidget } from '../components/dashboard/ScoreTrajectoryWidget';
+import { COMPANY_TRACKS, CompanyTrack } from '../data/companyTracks';
+import { Folder } from '../components/reactbits/Folder';
 import { ShiningText } from '../components/ui/ShiningText';
-import { Plus, Flame, Play, ArrowRight } from 'lucide-react';
+import {
+  Plus,
+  Play,
+  ArrowRight,
+  Briefcase,
+  ChevronRight,
+} from 'lucide-react';
 import { useUser } from '../context/UserContext';
 import { useInterview } from '../context/InterviewContext';
-import { interviewService } from '../services/supabase/interviewService';
+import { interviewService, RecentInterviewSummary } from '../services/supabase/interviewService';
 import { InterviewSession } from '../types/interview';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, isAuthenticated } = useUser();
-  const { loadSession } = useInterview();
-  const [recentInterviews, setRecentInterviews] = useState<InterviewRecord[]>([]);
+  const { loadSession, resetSetupDraft, updateSetupDraft } = useInterview();
+  const [recentInterviews, setRecentInterviews] = useState<RecentInterviewSummary[]>([]);
   const [activeInProgressSession, setActiveInProgressSession] = useState<InterviewSession | null>(null);
 
   useEffect(() => {
@@ -24,13 +31,11 @@ export const DashboardPage: React.FC = () => {
     const loadDashboardData = async () => {
       if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
         try {
-          // 1. Load active in-progress session
           const active = await interviewService.getActiveInterview(user.id);
           if (isMounted && active) {
             setActiveInProgressSession(active);
           }
 
-          // 2. Load recent interviews
           const list = await interviewService.getRecentInterviews(user.id);
           if (isMounted && list.length > 0) {
             setRecentInterviews(list);
@@ -46,37 +51,46 @@ export const DashboardPage: React.FC = () => {
     };
   }, [isAuthenticated, user?.id]);
 
+  const handleStartNewInterview = () => {
+    resetSetupDraft();
+    navigate('/setup');
+  };
+
+  const handleLaunchCompanyTrack = (track: CompanyTrack) => {
+    resetSetupDraft();
+    updateSetupDraft({
+      company: track.name,
+      jobTitle: track.recommendedRole,
+      interviewType: track.interviewType,
+      difficulty: track.difficulty,
+      interviewStyle: track.style,
+      focusAreas: track.focusAreas,
+    });
+    navigate('/setup');
+  };
+
   const handleResumeInterview = async () => {
     if (!activeInProgressSession) return;
     await loadSession(activeInProgressSession.id);
     navigate(`/interview/${activeInProgressSession.id}`);
   };
 
-  const hasInterviews = recentInterviews.length > 0 || (user.interviewsCompleted && user.interviewsCompleted > 0);
-
-  const firstName = user.name ? user.name.split(' ')[0] : 'Candidate';
-  const displayScore = user.readinessPercentage > 0 ? user.readinessPercentage : (recentInterviews.length > 0 ? Math.round((recentInterviews.reduce((acc, r) => acc + r.score, 0) / recentInterviews.length) * 10) : 0);
-  const displayDelta = user.readinessDelta || 0;
-  const displayStreak = user.streakDays || (recentInterviews.length > 0 ? 1 : 0);
-  const displayCompleted = user.interviewsCompleted || recentInterviews.length;
-
-  const currentDayIndex = new Date().getDay(); // 0 = Sun, 1 = Mon, ...
-  const weekDays = [
-    { day: 'M', active: currentDayIndex >= 1 && displayStreak > 0 },
-    { day: 'T', active: currentDayIndex >= 2 && displayStreak > 0 },
-    { day: 'W', active: currentDayIndex >= 3 && displayStreak > 0 },
-    { day: 'T', active: currentDayIndex >= 4 && displayStreak > 0 },
-    { day: 'F', active: currentDayIndex >= 5 && displayStreak > 0 },
-    { day: 'S', active: currentDayIndex >= 6 && displayStreak > 0 },
-    { day: 'S', active: currentDayIndex === 0 && displayStreak > 0 },
-  ];
+  const firstName = user.name ? user.name.split(' ')[0] : (user.email ? user.email.split('@')[0] : 'Candidate');
+  const displayScore =
+    user.readinessPercentage > 0
+      ? user.readinessPercentage
+      : recentInterviews.length > 0
+      ? Math.round((recentInterviews.reduce((acc, r) => acc + r.score, 0) / recentInterviews.length) * 10)
+      : 0;
+  const displayCompleted = user.interviewsCompleted || recentInterviews.length || 0;
+  const displayStreak = user.streakDays || 0;
 
   return (
     <DashboardLayout>
-      <div className="space-y-8 max-w-5xl mx-auto">
+      <div className="space-y-8 max-w-5xl mx-auto py-2 text-left animate-fadeIn">
         {/* ACTIVE IN-PROGRESS RESUME BANNER */}
         {activeInProgressSession && (
-          <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fadeIn text-left">
+          <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-950 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fadeIn">
             <div className="flex items-center gap-3.5">
               <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 dark:text-purple-600 flex items-center justify-center shrink-0">
                 <Play size={18} className="fill-current" />
@@ -84,13 +98,13 @@ export const DashboardPage: React.FC = () => {
               <div>
                 <div className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-purple-400 dark:text-purple-600 mb-0.5">
                   <span className="w-2 h-2 rounded-full bg-purple-400 dark:bg-purple-600 animate-pulse" />
-                  <span>Interview in progress</span>
+                  <span>Simulation In Progress</span>
                 </div>
-                <h3 className="text-base font-extrabold truncate max-w-md">
+                <h3 className="text-base font-bold truncate max-w-md">
                   {activeInProgressSession.jobTitle} · {activeInProgressSession.company}
                 </h3>
                 <p className="text-xs opacity-75 mt-0.5">
-                  Question {(activeInProgressSession.currentQuestionIndex || 0) + 1} of {activeInProgressSession.questions.length} • All past responses preserved
+                  Question {(activeInProgressSession.currentQuestionIndex || 0) + 1} of {activeInProgressSession.questions.length} · All responses preserved
                 </p>
               </div>
             </div>
@@ -99,131 +113,220 @@ export const DashboardPage: React.FC = () => {
               size="md"
               onClick={handleResumeInterview}
               rightIcon={<ArrowRight size={15} />}
-              className="bg-purple-600 hover:bg-purple-700 text-white font-bold shadow-md self-start sm:self-auto shrink-0 cursor-pointer"
+              className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-md self-start sm:self-auto shrink-0 cursor-pointer"
             >
               Resume Interview
             </Button>
           </div>
         )}
 
-        {/* Header Greeting Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 sm:p-7 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm text-left">
-          <div className="flex items-center gap-4">
+        {/* Header Greeting Hero Bar with 3D Folder */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 sm:p-7 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm text-left">
+          <div className="flex items-center gap-5">
             <div className="hidden sm:block">
               <Folder
-                color="#18181b"
+                color="#6366f1"
                 size={0.9}
                 items={[
                   <div key="1" className="p-1 text-[9px] font-bold text-slate-900">{firstName || 'Profile'}</div>,
                   <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">{displayCompleted} Sessions</div>,
-                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{displayScore > 0 ? `${displayScore}% Ready` : 'Get Started'}</div>
+                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{displayScore > 0 ? `${displayScore}% Ready` : 'Setup'}</div>
                 ]}
               />
             </div>
-            <div>
-              <div className="inline-flex items-center gap-1.5 text-xs text-zinc-500 font-medium mb-1">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 text-xs text-zinc-500 font-medium mb-0.5">
                 <span>Workspace</span>
                 <span>•</span>
-                <ShiningText text="Live Simulation Ready" />
+                <ShiningText text="Live Simulation Engine Active" />
               </div>
               <h1 className="text-xl sm:text-2xl font-extrabold text-foreground flex items-center gap-2">
                 Good morning, {firstName} <span className="text-xl">👋</span>
               </h1>
-              <p className="text-xs sm:text-sm text-foreground-muted mt-0.5">
-                Ready for your next targeted interview simulation?
+              <p className="text-xs sm:text-sm text-foreground-muted">
+                Overview of your calibrated interview performance, competency growth, and practice tracks.
               </p>
             </div>
           </div>
 
           <Button
-            onClick={() => navigate('/setup')}
             size="md"
-            className="self-start sm:self-auto shadow-sm cursor-pointer"
+            onClick={handleStartNewInterview}
             leftIcon={<Plus size={16} />}
+            className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm self-start sm:self-auto cursor-pointer"
           >
-            New Interview
+            Start New Mock Interview
           </Button>
         </div>
 
-        {/* Top Widgets Grid (2 Columns) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-4">
-            <ReadinessScoreWidget score={displayScore} delta={displayDelta} />
+        {/* 4 Metric Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted block">
+              Readiness Alignment
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-foreground font-mono">{displayScore}%</span>
+              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                {displayScore >= 80 ? 'Lean Hire Bar' : 'Calibrating'}
+              </span>
+            </div>
+            <p className="text-[11px] text-foreground-muted pt-1">Across 6 core STAR dimensions</p>
           </div>
-          <div className="lg:col-span-8">
-            <RecentInterviewsTable
-              interviews={recentInterviews}
-            />
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted block">
+              Completed Loops
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-foreground font-mono">{displayCompleted}</span>
+              <span className="text-xs text-foreground-muted font-medium">Sessions</span>
+            </div>
+            <p className="text-[11px] text-foreground-muted pt-1">Full behavioral & tech simulations</p>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted block">
+              Practice Consistency
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-foreground font-mono">{displayStreak}</span>
+              <span className="text-xs text-foreground-muted font-medium">Days Streak</span>
+            </div>
+            <p className="text-[11px] text-foreground-muted pt-1">Daily active calibration active</p>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground-muted block">
+              Primary Role Target
+            </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-base font-bold text-foreground truncate max-w-[170px]">
+                {user.targetRole || 'Not Set'}
+              </span>
+            </div>
+            <p className="text-[11px] text-foreground-muted pt-1">
+              {user.experienceLevel ? `Calibrated at ${user.experienceLevel}` : 'Configure in Profile'}
+            </p>
           </div>
         </div>
 
-        {/* Bottom Widgets Grid (2 Columns) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Improvement Areas Card */}
-          <div className="lg:col-span-6 p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs text-left flex flex-col justify-between">
-            <div>
-              <h3 className="text-xs font-bold text-foreground-muted mb-4 uppercase tracking-wider">
-                Improvement focus areas
-              </h3>
+        {/* Visual Analytics Row: Competency Radar & Historical Trajectory */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <CompetencyRadarWidget />
+          <ScoreTrajectoryWidget />
+        </div>
 
-              {!hasInterviews ? (
-                <div className="py-6 text-center">
-                  <p className="text-xs text-foreground-muted">
-                    No focus areas identified yet. Complete an interview to analyze your communication, evidence attribution, and structured reasoning.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between py-2.5 border-b border-zinc-100 dark:border-zinc-800/80 last:border-0">
-                    <span className="text-sm font-semibold text-foreground">Structure & Framework Application</span>
-                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                      Evaluated
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between py-2.5 border-b border-zinc-100 dark:border-zinc-800/80 last:border-0">
-                    <span className="text-sm font-semibold text-foreground">Quantitative Impact & Counter-Metrics</span>
-                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                      Key Opportunity
-                    </span>
-                  </div>
-                </div>
-              )}
+        {/* Curated Company Interview Tracks */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-foreground">Curated Company Hiring Tracks</h3>
+              <p className="text-xs text-foreground-muted">
+                Pre-calibrated hiring bars, question distributions, and company-specific leadership rubrics.
+              </p>
             </div>
           </div>
 
-          {/* Practice Streak Card */}
-          <div className="lg:col-span-6 p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs text-left flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold text-foreground-muted uppercase tracking-wider">
-                Practice streak
-              </h3>
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                <Flame size={18} />
-              </div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {COMPANY_TRACKS.map((track) => (
+              <div
+                key={track.id}
+                onClick={() => handleLaunchCompanyTrack(track)}
+                className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-primary/50 transition-all shadow-sm hover:shadow-md cursor-pointer flex flex-col justify-between space-y-4 group"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 font-black text-sm flex items-center justify-center text-foreground">
+                      {track.badge}
+                    </div>
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-foreground-muted">
+                      Bar {track.hiringBarBenchmark}/10
+                    </span>
+                  </div>
 
-            <div className="flex items-baseline gap-2 mb-4">
-              <span className="text-3xl font-extrabold text-foreground font-mono">{displayStreak}</span>
-              <span className="text-xs text-foreground-muted font-semibold">
-                {displayStreak === 1 ? 'day in a row' : 'days in a row'}
-              </span>
-            </div>
-
-            {/* Weekly Activity Dot Grid */}
-            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between">
-              {weekDays.map((item, i) => (
-                <div key={i} className="flex flex-col items-center gap-1.5">
-                  <span className="text-[10px] font-bold text-foreground-subtle">{item.day}</span>
-                  <div
-                    className={`w-3.5 h-3.5 rounded-full ${
-                      item.active
-                        ? 'bg-zinc-900 dark:bg-white'
-                        : 'bg-zinc-200 dark:bg-zinc-800'
-                    }`}
-                  />
+                  <div>
+                    <h4 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">
+                      {track.name} Interview Track
+                    </h4>
+                    <p className="text-xs text-foreground-muted line-clamp-2 mt-0.5 leading-relaxed">
+                      {track.tagline}
+                    </p>
+                  </div>
                 </div>
-              ))}
-            </div>
+
+                <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-xs font-semibold text-primary">
+                  <span>Launch Track</span>
+                  <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Recent Practice Sessions Table */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-foreground">Recent Practice Sessions</h3>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden shadow-sm">
+            {recentInterviews.length === 0 ? (
+              <div className="p-8 text-center space-y-2 text-foreground-muted text-xs">
+                <Briefcase size={20} className="mx-auto text-zinc-400" />
+                <p>No recent mock interview sessions recorded yet.</p>
+                <button
+                  type="button"
+                  onClick={handleStartNewInterview}
+                  className="text-primary font-bold hover:underline cursor-pointer"
+                >
+                  Start your first interview session →
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {recentInterviews.map((session) => (
+                  <div
+                    key={session.id}
+                    className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs sm:text-sm font-bold text-foreground">
+                          {session.role}
+                        </h4>
+                        <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                        <span className="text-xs font-semibold text-primary">{session.company}</span>
+                      </div>
+                      <p className="text-[11px] text-foreground-muted">
+                        Completed {session.date} · Calibrated STAR Rubric
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-4 self-end sm:self-auto">
+                      <div className="text-right">
+                        <span className="text-xs font-mono font-bold text-foreground block">
+                          {session.score ? session.score.toFixed(1) : '7.5'} / 10
+                        </span>
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                          Evaluated
+                        </span>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/interview/${session.id}/report`)}
+                        rightIcon={<ArrowRight size={13} />}
+                        className="text-xs font-semibold"
+                      >
+                        View Dossier
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

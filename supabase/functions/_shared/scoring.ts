@@ -266,3 +266,7 @@ export function computeDeterministicMatchScore(
     totalScore: rawScore,
   };
 }
+
+export function calculateReadinessPercentage(overallScore: number): number {
+  return Math.min(100, Math.max(0, Math.round(overallScore * 10)));
+}

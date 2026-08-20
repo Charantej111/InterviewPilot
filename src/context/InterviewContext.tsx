@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { 
   InterviewSession, 
   Question, 
@@ -91,13 +91,19 @@ interface InterviewContextType {
   pauseTimer: () => void;
   resetTimer: () => void;
 
-  // Actions
+  setFinalReport: (report: FinalReport | null) => void;
   loadSession: (sessionId: string) => Promise<void>;
   startVoiceSession: () => Promise<void>;
   stopVoiceSession: () => Promise<void>;
   switchToTextMode: () => Promise<void>;
   submitCandidateAnswer: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => Promise<QuestionFeedback>;
   advanceToNextQuestion: () => Promise<boolean>;
+  completeInterviewSession: (finalAnswer?: {
+    questionId: string;
+    answerText: string;
+    inputMode: 'text' | 'voice';
+    durationSeconds: number;
+  }) => Promise<{ status: InterviewSession['status']; report?: FinalReport }>;
   getReport: (sessionId?: string) => Promise<FinalReport>;
   terminateActiveSession: (reason?: string) => Promise<void>;
   triggerBargeIn: () => void;
@@ -193,6 +199,14 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const resetSetupDraft = () => {
     setSetupDraft(defaultSetupDraft);
     storage.set('setup_draft_v2', defaultSetupDraft);
+    const emptySession = createEmptySession();
+    setActiveSession(emptySession);
+    storage.set('current_session', emptySession);
+    setFinalReport(null);
+    storage.remove('final_report');
+    setRemainingSeconds(20 * 60);
+    setTimerSeconds(0);
+    setIsTimerRunning(false);
   };
 
   const uploadResumeFile = async (file: File) => {
@@ -487,17 +501,32 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const loadSession = async (sessionId: string) => {
+    let loaded: InterviewSession | null = null;
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-      const session = await interviewService.getSessionById(user.id, sessionId);
-      if (session) {
-        setActiveSession(session);
-        storage.set('current_session', session);
-        return;
+      loaded = await interviewService.getSessionById(user.id, sessionId);
+    }
+    if (!loaded) {
+      const saved = storage.get<InterviewSession | null>('current_session', null);
+      if (saved && saved.id === sessionId) {
+        loaded = saved;
       }
     }
-    const saved = storage.get<InterviewSession | null>('current_session', null);
-    if (saved && saved.id === sessionId) {
-      setActiveSession(saved);
+
+    if (loaded) {
+      setActiveSession(loaded);
+      storage.set('current_session', loaded);
+
+      if (loaded.status === 'in_progress') {
+        const elapsedSeconds = loaded.createdAt ? (Date.now() - new Date(loaded.createdAt).getTime()) / 1000 : 0;
+        const totalDuration = (loaded.durationMinutes || 20) * 60;
+        const derivedRemaining = Math.max(0, Math.round(totalDuration - elapsedSeconds));
+        const finalRemaining = loaded.remainingTime !== undefined ? Math.min(loaded.remainingTime, derivedRemaining) : derivedRemaining;
+        setRemainingSeconds(finalRemaining);
+        setIsTimerRunning(finalRemaining > 0);
+      } else {
+        setRemainingSeconds(0);
+        setIsTimerRunning(false);
+      }
     }
   };
 
@@ -946,7 +975,72 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
 
-  const getReport = async (sessionId?: string): Promise<FinalReport> => {
+  const completeInterviewSession = async (finalAnswer?: {
+    questionId: string;
+    answerText: string;
+    inputMode: 'text' | 'voice';
+    durationSeconds: number;
+  }): Promise<{ status: InterviewSession['status']; report?: FinalReport }> => {
+    setIsTimerRunning(false);
+    setRemainingSeconds(0);
+    setEngineState('completing');
+
+    const targetSessionId = activeSession.id;
+    const currentUserId = user?.id || 'mock_user';
+
+    // Optimistically update local session state immediately so UI never renders question again
+    const completingSession: InterviewSession = {
+      ...activeSession,
+      status: 'completing',
+      remainingTime: 0,
+      currentQuestionIndex: activeSession.questions?.length || activeSession.currentQuestionIndex,
+    };
+    setActiveSession(completingSession);
+    storage.set('current_session', completingSession);
+
+    if (activeSession.mode === 'voice') {
+      try {
+        await stopVoiceSession();
+      } catch (voiceStopErr) {
+        console.warn('Voice stop notice:', voiceStopErr);
+      }
+    }
+
+    try {
+      const result = await interviewService.completeInterview({
+        userId: currentUserId,
+        interviewId: targetSessionId,
+        finalAnswer,
+        idempotencyKey: crypto.randomUUID(),
+      });
+
+      if (result.report) {
+        setFinalReport(result.report);
+        const readySession: InterviewSession = {
+          ...completingSession,
+          status: 'report_ready',
+          completedAt: new Date().toISOString(),
+        };
+        setActiveSession(readySession);
+        storage.set('current_session', readySession);
+      }
+
+      setEngineState('completed');
+      return result;
+    } catch (err) {
+      console.error('Error completing interview session:', err);
+      const failedSession: InterviewSession = {
+        ...completingSession,
+        status: 'report_failed',
+      };
+      setActiveSession(failedSession);
+      storage.set('current_session', failedSession);
+      setEngineState('ready');
+      return { status: 'report_failed' };
+    }
+  };
+
+  const getReport = useCallback(async (sessionId?: string): Promise<FinalReport> => {
     const targetSessionId = sessionId || activeSession.id;
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !targetSessionId.startsWith('sess_acme')) {
       try {
@@ -969,7 +1063,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setFinalReport(report);
     return report;
-  };
+  }, [isAuthenticated, user?.id, activeSession.id, activeSession.jobTitle, activeSession.company, activeSession.questions, activeSession.answers, activeSession.feedbacks]);
 
   const terminateActiveSession = async () => {
     setActiveSession((prev) => {
@@ -1018,6 +1112,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         interviewerSpokenText,
         latestFeedback,
         finalReport,
+        setFinalReport,
         isEvaluating,
         isPreparingNextQuestion,
         isInterrupted,
@@ -1033,6 +1128,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         switchToTextMode,
         submitCandidateAnswer,
         advanceToNextQuestion,
+        completeInterviewSession,
         getReport,
         terminateActiveSession,
         triggerBargeIn,

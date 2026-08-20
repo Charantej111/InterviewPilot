@@ -13,10 +13,12 @@ import {
 import { ThemeToggle } from './ThemeToggle';
 import { Logo } from '../ui/Logo';
 import { Avatar } from '../ui/Avatar';
+import { useUser } from '../../context/UserContext';
+import { useInterview } from '../../context/InterviewContext';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/setup', label: 'Interviews', icon: Layers },
+  { path: '/setup', label: 'New Interview', icon: Layers, isNew: true },
   { path: '/profile', label: 'Profile', icon: User },
   { path: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
@@ -28,6 +30,9 @@ export interface AppShellProps {
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const { resetSetupDraft } = useInterview();
+  const { user } = useUser();
+  const displayName = user.name || (user.email ? user.email.split('@')[0] : 'Candidate');
 
   return (
     <div className="app-shell">
@@ -38,7 +43,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         </Link>
 
         <nav className="side-nav mt-8 space-y-1">
-          {navItems.map(({ path, label, icon: Icon }) => {
+          {navItems.map(({ path, label, icon: Icon, isNew }) => {
             const isActive = 
               location.pathname === path || 
               (path === '/setup' && location.pathname.startsWith('/interview'));
@@ -47,6 +52,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               <NavLink
                 key={path}
                 to={path}
+                onClick={() => {
+                  if (isNew) resetSetupDraft();
+                }}
                 className={isActive ? 'active shadow-xs' : ''}
               >
                 <Icon size={16} className={isActive ? 'text-primary' : 'text-foreground-muted'} />
@@ -62,10 +70,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         {/* Bottom User Profile Section */}
         <div className="mt-auto pt-4 border-t border-border/80 flex items-center justify-between px-1">
           <Link to="/settings" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-            <Avatar name="Charan Tej" size="xs" status="online" />
+            <Avatar name={displayName} size="xs" status="online" />
             <div className="flex flex-col">
-              <span className="font-bold text-foreground text-xs leading-none">Charan Tej</span>
-              <span className="text-[10px] text-foreground-muted mt-0.5">Pro Member</span>
+              <span className="font-bold text-foreground text-xs leading-none truncate max-w-[110px]">{displayName}</span>
+              <span className="text-[10px] text-foreground-muted mt-0.5">{user.targetRole || 'Candidate'}</span>
             </div>
           </Link>
           <ThemeToggle />

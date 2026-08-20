@@ -21,6 +21,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { COMPANY_TRACKS, CompanyTrack } from '../data/companyTracks';
 
 export const SetupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -226,6 +227,45 @@ export const SetupPage: React.FC = () => {
         {/* MODE 1: SETUP & CONTEXT INPUT */}
         {mode === 'input' && !isProcessing && (
           <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6 animate-fadeIn">
+            {/* Quick-Select Curated Company Track */}
+            <div className="space-y-2 pb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-foreground-muted block">
+                Quick-Select Tier-1 Hiring Track (Optional)
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {COMPANY_TRACKS.map((track) => {
+                  const isSelected = setupDraft.company?.toLowerCase() === track.name.toLowerCase();
+                  return (
+                    <button
+                      key={track.id}
+                      type="button"
+                      onClick={() => {
+                        updateSetupDraft({
+                          company: track.name,
+                          jobTitle: setupDraft.jobTitle || track.recommendedRole,
+                          interviewType: track.interviewType,
+                          difficulty: track.difficulty,
+                          interviewStyle: track.style,
+                          focusAreas: track.focusAreas,
+                        });
+                      }}
+                      className={cn(
+                        'px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer',
+                        isSelected
+                          ? 'border-primary bg-primary/10 text-primary shadow-xs'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 text-foreground-muted hover:text-foreground'
+                      )}
+                    >
+                      <span className="w-4 h-4 rounded bg-zinc-200 dark:bg-zinc-700 text-[10px] flex items-center justify-center font-black text-foreground">
+                        {track.badge}
+                      </span>
+                      <span>{track.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Target Role & Target Company from JD */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">

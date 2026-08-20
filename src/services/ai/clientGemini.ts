@@ -3,6 +3,7 @@ export interface ClientGeminiConfig {
   temperature?: number;
   maxOutputTokens?: number;
   retries?: number;
+  timeoutMs?: number;
   apiKey?: string;
   inlineData?: {
     mimeType: string;
@@ -11,14 +12,10 @@ export interface ClientGeminiConfig {
 }
 
 export const CANDIDATE_GEMINI_MODELS = [
-  'gemini-1.5-flash',
   'gemini-2.0-flash',
+  'gemini-1.5-flash',
   'gemini-1.5-pro',
-  'gemini-2.5-flash',
-  'gemini-flash-latest',
-  'gemini-flash-lite-latest',
 ];
-
 
 export function cleanJsonText(raw: string): string {
   let cleaned = raw.trim();
@@ -73,8 +70,8 @@ export async function callClientGeminiStructured<T>(
   config?: ClientGeminiConfig
 ): Promise<T> {
   const apiKey = getEffectiveApiKey(config?.apiKey);
-  if (!apiKey) {
-    throw new Error('VITE_GEMINI_API_KEY is not configured in client environment.');
+  if (!apiKey || (!apiKey.startsWith('AIza') && apiKey.startsWith('AQ.'))) {
+    throw new Error('[Client Gemini] Valid Google AI Studio API key (AIza...) required.');
   }
 
   const candidateModels = config?.model
@@ -82,7 +79,7 @@ export async function callClientGeminiStructured<T>(
     : CANDIDATE_GEMINI_MODELS;
 
   const temperature = config?.temperature ?? 0.2;
-  const maxRetries = config?.retries ?? 1;
+  const maxRetries = config?.retries ?? 0;
   let lastError: Error | null = null;
 
   const parts: any[] = [];
@@ -104,6 +101,7 @@ export async function callClientGeminiStructured<T>(
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(config?.timeoutMs || 15000),
           body: JSON.stringify({
             contents: [{ role: 'user', parts }],
             systemInstruction: systemInstruction
@@ -119,12 +117,15 @@ export async function callClientGeminiStructured<T>(
 
         if (!response.ok) {
           const errText = await response.text();
-          const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
+          if (response.status === 401 || response.status === 403) {
+            throw new Error(`[Client Gemini] API Key unauthorized (${response.status}): ${errText}`);
+          }
 
+          const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
           if (isOverloadedOrNotFound) {
             console.warn(`[Client Gemini] Model ${model} returned ${response.status}. Cascading to next candidate model...`);
             lastError = new Error(`Gemini API error (${response.status}): ${errText}`);
-            break; // Break inner retry loop to immediately try next model in cascade
+            break; // Break inner retry loop to try next model in cascade
           }
 
           throw new Error(`Gemini API error (${response.status}): ${errText}`);
@@ -140,35 +141,38 @@ export async function callClientGeminiStructured<T>(
         return JSON.parse(cleaned) as T;
       } catch (err: any) {
         lastError = err;
+        if (err.message?.includes('unauthorized') || err.message?.includes('Valid Google AI')) {
+          throw err;
+        }
         if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 350));
+          await new Promise((r) => setTimeout(r, 600 * Math.pow(1.5, attempt)));
         }
       }
     }
   }
 
-  throw lastError || new Error('Failed to obtain structured JSON from Gemini across all candidate models.');
+  throw lastError || new Error('All candidate Gemini models in cascade failed to respond.');
 }
 
 /**
- * Calls Gemini directly from the client for conversational text with multi-model cascade.
+ * Calls Gemini directly from the client with plain text response and multi-model cascade.
  */
-export async function callClientGeminiText(
+export async function callClientGemini(
   prompt: string,
   systemInstruction?: string,
   config?: ClientGeminiConfig
 ): Promise<string> {
   const apiKey = getEffectiveApiKey(config?.apiKey);
-  if (!apiKey) {
-    throw new Error('VITE_GEMINI_API_KEY is not configured in client environment.');
+  if (!apiKey || (!apiKey.startsWith('AIza') && apiKey.startsWith('AQ.'))) {
+    throw new Error('[Client Gemini] Valid Google AI Studio API key (AIza...) required.');
   }
 
   const candidateModels = config?.model
     ? [config.model, ...CANDIDATE_GEMINI_MODELS.filter((m) => m !== config.model)]
     : CANDIDATE_GEMINI_MODELS;
 
-  const temperature = config?.temperature ?? 0.7;
-  const maxRetries = config?.retries ?? 1;
+  const temperature = config?.temperature ?? 0.3;
+  const maxRetries = config?.retries ?? 0;
   let lastError: Error | null = null;
 
   const parts: any[] = [];
@@ -190,6 +194,7 @@ export async function callClientGeminiText(
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(config?.timeoutMs || 15000),
           body: JSON.stringify({
             contents: [{ role: 'user', parts }],
             systemInstruction: systemInstruction
@@ -204,32 +209,40 @@ export async function callClientGeminiText(
 
         if (!response.ok) {
           const errText = await response.text();
-          const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
+          if (response.status === 401 || response.status === 403) {
+            throw new Error(`[Client Gemini] API Key unauthorized (${response.status}): ${errText}`);
+          }
 
+          const isOverloadedOrNotFound = response.status === 503 || response.status === 404 || response.status === 429;
           if (isOverloadedOrNotFound) {
-            console.warn(`[Client Gemini Text] Model ${model} returned ${response.status}. Cascading to next candidate model...`);
-            lastError = new Error(`Gemini API text error (${response.status}): ${errText}`);
+            console.warn(`[Client Gemini] Model ${model} returned ${response.status}. Cascading to next candidate model...`);
+            lastError = new Error(`Gemini API error (${response.status}): ${errText}`);
             break;
           }
 
-          throw new Error(`Gemini API text error (${response.status}): ${errText}`);
+          throw new Error(`Gemini API error (${response.status}): ${errText}`);
         }
 
         const data = await response.json();
         const textOutput = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!textOutput) {
-          throw new Error(`No text generated by Gemini model ${model}.`);
+          throw new Error(`No candidate text generated by Gemini model ${model}.`);
         }
 
         return textOutput.trim();
       } catch (err: any) {
         lastError = err;
+        if (err.message?.includes('unauthorized') || err.message?.includes('Valid Google AI')) {
+          throw err;
+        }
         if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 350));
+          await new Promise((r) => setTimeout(r, 600 * Math.pow(1.5, attempt)));
         }
       }
     }
   }
 
-  throw lastError || new Error('Failed to obtain text from Gemini across all candidate models.');
+  throw lastError || new Error('All candidate Gemini models in cascade failed to respond.');
 }
+
+export const callClientGeminiText = callClientGemini;

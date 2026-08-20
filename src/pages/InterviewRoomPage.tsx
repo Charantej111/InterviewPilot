@@ -5,9 +5,9 @@ import { DarkGradientBg } from '../components/ui/DarkGradientBg';
 import { InterviewHeader } from '../components/interview/InterviewHeader';
 import { QuestionBlock } from '../components/interview/QuestionBlock';
 import { AnswerInput } from '../components/interview/AnswerInput';
-import { AILoader } from '../components/ui/AILoader';
+import { InterviewCompletionScreen } from '../components/interview/InterviewCompletionScreen';
 import { ExitConfirmModal } from '../components/interview/ExitConfirmModal';
-import { AlertTriangle, ShieldAlert, ArrowRight } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ArrowRight, Clock, Sparkles } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
 export const InterviewRoomPage: React.FC = () => {
@@ -18,7 +18,9 @@ export const InterviewRoomPage: React.FC = () => {
     loadSession,
     submitCandidateAnswer,
     advanceToNextQuestion,
+    completeInterviewSession,
     getReport,
+    remainingSeconds,
     terminateActiveSession,
   } = useInterview();
 
@@ -26,28 +28,67 @@ export const InterviewRoomPage: React.FC = () => {
   const [tabViolations, setTabViolations] = useState(0);
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
-  const [isFinishingInterview, setIsFinishingInterview] = useState(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const [isRetryingReport, setIsRetryingReport] = useState(false);
 
   const questionContainerRef = useRef<HTMLDivElement>(null);
+  const isCompletingRef = useRef(false);
+  const isResolvingReportRef = useRef(false);
 
-  // Load session by ID on mount if needed
+  const targetSessionId = id || activeSession.id;
+
+  // 1. Initial load & sync on mount
   useEffect(() => {
     if (id && activeSession.id !== id) {
       loadSession(id);
     }
   }, [id, activeSession.id, loadSession]);
 
-  // Check if session is already failed / terminated
+  // 2. Authoritative Database Lifecycle Status Routing
   useEffect(() => {
     if (activeSession?.status === 'failed') {
       setIsTerminated(true);
+      return;
     }
-  }, [activeSession?.status]);
 
-  // Anti-Cheating: Tab Switch / Visibility Change Detection
+    if (activeSession?.status === 'report_ready') {
+      navigate(`/interview/${targetSessionId}/report`, { replace: true });
+      return;
+    }
+
+    // If session is already completing or report generating (e.g. after refresh), poll or generate report
+    const isFinishingStatus =
+      activeSession?.status === 'completing' ||
+      activeSession?.status === 'completed' ||
+      activeSession?.status === 'report_generating';
+
+    if (isFinishingStatus && targetSessionId && !targetSessionId.startsWith('mock_')) {
+      if (isResolvingReportRef.current) return;
+      isResolvingReportRef.current = true;
+
+      let isMounted = true;
+      const resolveReport = async () => {
+        try {
+          const report = await getReport(targetSessionId);
+          if (isMounted && report) {
+            navigate(`/interview/${targetSessionId}/report`, { replace: true });
+          }
+        } catch (err) {
+          console.warn('Report resolution notice on load:', err);
+        }
+      };
+
+      const timer = setTimeout(resolveReport, 1000);
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+      };
+    }
+  }, [activeSession?.status, targetSessionId, navigate, getReport]);
+
+  // 3. Anti-Cheating Detection (Only active when in_progress)
   useEffect(() => {
-    if (isTerminated || isFinishingInterview) return;
+    if (isTerminated || activeSession.status !== 'in_progress') return;
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -68,9 +109,9 @@ export const InterviewRoomPage: React.FC = () => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isTerminated, isFinishingInterview, terminateActiveSession]);
+  }, [isTerminated, activeSession.status, terminateActiveSession]);
 
-  // Auto-scroll to question container when question changes
+  // Auto-scroll on question switch
   useEffect(() => {
     if (questionContainerRef.current) {
       questionContainerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -82,36 +123,65 @@ export const InterviewRoomPage: React.FC = () => {
   const activeQuestion = activeSession.questions?.[activeSession.currentQuestionIndex] || activeSession.questions?.[0];
   const isAdaptiveFollowUp = activeQuestion?.type === 'follow_up';
 
+  // 4. Idempotent Answer Submit & Completion Pipeline
   const handleAnswerSubmit = async (
     answerText: string,
     inputMode: 'text' | 'voice',
     durationSecs: number
   ) => {
+    if (isCompletingRef.current) return;
+
+    const isLastQuestion =
+      (activeSession.currentQuestionIndex || 0) + 1 >= (activeSession.questions?.length || 1) ||
+      remainingSeconds <= 0;
+
+    if (isLastQuestion) {
+      isCompletingRef.current = true;
+      try {
+        const res = await completeInterviewSession({
+          questionId: activeQuestion?.id || `q_${currentQuestionNum}`,
+          answerText,
+          inputMode,
+          durationSeconds: durationSecs,
+        });
+
+        if (res.status === 'report_ready' && res.report) {
+          navigate(`/interview/${targetSessionId}/report`, { replace: true });
+        }
+      } catch (err) {
+        console.error('Error during final completion submission:', err);
+      }
+      return;
+    }
+
+    // Intermediate question submission
     setIsAdvancing(true);
     try {
-      // 1. Submit answer
       await submitCandidateAnswer(answerText, inputMode, durationSecs);
-
-      // 2. Check if there are more questions
       const hasMore = await advanceToNextQuestion();
-
-      if (hasMore) {
-        setIsAdvancing(false);
-      } else {
-        // All questions completed! Trigger holistic evaluation
-        setIsFinishingInterview(true);
-        const targetSessionId = id || activeSession.id;
-        try {
-          await getReport(targetSessionId);
-        } catch (reportErr) {
-          console.warn('Report generation completed with fallback:', reportErr);
-        }
-        navigate(`/interview/${targetSessionId}/report`);
+      if (!hasMore) {
+        isCompletingRef.current = true;
+        await completeInterviewSession();
+        navigate(`/interview/${targetSessionId}/report`, { replace: true });
       }
     } catch (err) {
-      console.error('Error during answer submission:', err);
+      console.error('Error submitting answer:', err);
+    } finally {
       setIsAdvancing(false);
-      setIsFinishingInterview(false);
+    }
+  };
+
+  const handleRetryReport = async () => {
+    setIsRetryingReport(true);
+    try {
+      const rep = await getReport(targetSessionId);
+      if (rep) {
+        navigate(`/interview/${targetSessionId}/report`, { replace: true });
+      }
+    } catch (err) {
+      console.error('Error retrying report generation:', err);
+    } finally {
+      setIsRetryingReport(false);
     }
   };
 
@@ -119,6 +189,12 @@ export const InterviewRoomPage: React.FC = () => {
     setIsExitModalOpen(false);
     navigate('/dashboard');
   };
+
+  const isFinishingStatus =
+    activeSession?.status === 'completing' ||
+    activeSession?.status === 'completed' ||
+    activeSession?.status === 'report_generating' ||
+    activeSession?.status === 'report_failed';
 
   return (
     <DarkGradientBg className="flex flex-col text-foreground min-h-screen">
@@ -149,7 +225,7 @@ export const InterviewRoomPage: React.FC = () => {
               <Button
                 size="md"
                 onClick={() => setShowTabWarning(false)}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold"
+                className="w-full bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold cursor-pointer"
               >
                 I Understand, Return to Interview
               </Button>
@@ -174,7 +250,7 @@ export const InterviewRoomPage: React.FC = () => {
                 size="md"
                 onClick={() => navigate('/dashboard')}
                 rightIcon={<ArrowRight size={15} />}
-                className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold"
+                className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold cursor-pointer"
               >
                 Return to Dashboard
               </Button>
@@ -182,16 +258,28 @@ export const InterviewRoomPage: React.FC = () => {
           </div>
         )}
 
-        {/* AI EVALUATION LOADER */}
-        {isFinishingInterview ? (
-          <AILoader
-            title="Synthesizing Candidate Dossier"
-            stage="Evaluating holistic responses across STAR rubric, metrics depth, and hiring bar standards..."
+        {/* DEDICATED COMPLETION SCREEN WHEN FINISHING / COMPLETED / GENERATING REPORT */}
+        {isFinishingStatus ? (
+          <InterviewCompletionScreen
+            status={activeSession.status as any}
+            onRetry={handleRetryReport}
+            onGoToDashboard={() => navigate('/dashboard')}
+            onViewReport={() => navigate(`/interview/${targetSessionId}/report`)}
           />
         ) : (
           <div ref={questionContainerRef} className="space-y-6 animate-fadeIn">
+            {/* Timer Expired Banner Alert */}
+            {remainingSeconds <= 0 && (
+              <div className="p-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-3 animate-fadeIn">
+                <div className="flex items-center gap-2.5 font-medium">
+                  <Clock size={16} className="text-amber-400 shrink-0" />
+                  <span>Session time has expired. Please submit your final response to synthesize your report.</span>
+                </div>
+              </div>
+            )}
+
             {/* Question Card */}
-            <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-zinc-900/90 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl text-left transition-all">
+            <div className="p-7 sm:p-9 rounded-3xl bg-white dark:bg-zinc-900/90 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 shadow-xl text-left transition-all">
               {activeQuestion && (
                 <QuestionBlock
                   question={activeQuestion}
@@ -200,11 +288,11 @@ export const InterviewRoomPage: React.FC = () => {
               )}
             </div>
 
-            {/* Answer Input Area (Anti-paste + Direct continuous flow) */}
+            {/* Answer Input Area */}
             <AnswerInput
               key={activeQuestion?.id || activeSession.currentQuestionIndex}
               onSubmit={handleAnswerSubmit}
-              isSubmitting={isAdvancing || isFinishingInterview}
+              isSubmitting={isAdvancing || isFinishingStatus}
             />
           </div>
         )}

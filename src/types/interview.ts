@@ -222,7 +222,7 @@ export interface InterviewSession {
   id: string;
   createdAt: string;
   completedAt?: string;
-  status: 'draft' | 'in_progress' | 'evaluating' | 'completed' | 'failed';
+  status: 'draft' | 'preparing' | 'ready' | 'in_progress' | 'completing' | 'evaluating' | 'completed' | 'report_generating' | 'report_ready' | 'report_failed' | 'failed';
   mode: InterviewMode;
   voiceProvider?: string | null;
   voiceSessionId?: string | null;

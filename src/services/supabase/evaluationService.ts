@@ -107,9 +107,9 @@ export const evaluationService = {
       .from('interviews')
       .select(`
         *,
-        questions (*),
-        answers (*),
-        evaluations (*)
+        questions:questions!questions_interview_id_fkey (*),
+        answers:answers!answers_interview_id_fkey (*),
+        evaluations:evaluations!evaluations_interview_id_fkey (*)
       `)
       .eq('id', interviewId)
       .eq('user_id', userId)
@@ -118,6 +118,15 @@ export const evaluationService = {
     if (intError || !interview) {
       console.error('Error fetching interview for final report:', intError);
       throw new Error(`Interview not found: ${intError?.message}`);
+    }
+
+    // 2. Return existing report immediately if already synthesized (Idempotent cache)
+    if (
+      interview.final_report &&
+      typeof interview.final_report === 'object' &&
+      (interview.final_report as any).overallScore !== undefined
+    ) {
+      return interview.final_report as unknown as FinalReport;
     }
 
     const rawQuestions: any[] = Array.isArray(interview.questions) ? interview.questions : [];
@@ -140,7 +149,14 @@ export const evaluationService = {
         recommendedDurationSeconds: q.recommended_duration_seconds || 180,
       }));
 
-    // 2. Invoke real generate-report Edge Function
+    // 3. Mark status as report_generating
+    await supabase
+      .from('interviews')
+      .update({ status: 'report_generating' })
+      .eq('id', interviewId)
+      .eq('user_id', userId);
+
+    // 4. Invoke real generate-report Edge Function / Client Gemini
     const report = await aiService.generateFinalReport({
       interviewId: interview.id,
       role: interview.target_role,
@@ -150,11 +166,11 @@ export const evaluationService = {
       evaluations: interview.evaluations || [],
     });
 
-    // 3. Update interview row in Supabase
+    // 5. Update interview row in Supabase to report_ready
     await supabase
       .from('interviews')
       .update({
-        status: 'completed',
+        status: 'report_ready',
         overall_score: report.overallScore,
         readiness_percentage: report.readinessPercentage,
         final_report: report as unknown as import('../../types/database.types').Json,

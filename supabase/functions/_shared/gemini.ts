@@ -3,6 +3,7 @@ export interface GeminiCallConfig {
   temperature?: number;
   maxOutputTokens?: number;
   retries?: number;
+  timeoutMs?: number;
   apiKey?: string;
   inlineData?: {
     mimeType: string;
@@ -11,12 +12,9 @@ export interface GeminiCallConfig {
 }
 
 export const CANDIDATE_GEMINI_MODELS = [
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-3.7-flash',
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
-  'gemini-flash-lite-latest',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
 ];
 
 /**
@@ -97,6 +95,7 @@ export async function callGeminiStructured<T>(
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(config?.timeoutMs || 25000),
           body: JSON.stringify({
             contents: [{ role: 'user', parts }],
             systemInstruction: systemInstruction
@@ -183,6 +182,7 @@ export async function callGeminiText(
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(config?.timeoutMs || 25000),
           body: JSON.stringify({
             contents: [{ role: 'user', parts }],
             systemInstruction: systemInstruction
