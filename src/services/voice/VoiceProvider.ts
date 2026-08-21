@@ -10,6 +10,18 @@ export type VoiceStatus =
   | 'disconnected' 
   | 'error';
 
+export type VoiceInterviewState =
+  | 'idle'
+  | 'interviewer_speaking'
+  | 'listening'
+  | 'candidate_speaking'
+  | 'candidate_paused'
+  | 'processing'
+  | 'interviewer_responding'
+  | 'recovering'
+  | 'paused'
+  | 'completed';
+
 export interface VoiceSessionConfig {
   voiceSessionId: string;
   interviewId: string;
@@ -41,9 +53,11 @@ export interface VoiceError {
 
 export interface VoiceEventListeners {
   onStatusChange: (status: VoiceStatus) => void;
-  onTranscript: (text: string, isFinal: boolean, isCandidate: boolean) => void;
+  onStateChange?: (state: VoiceInterviewState) => void;
+  onTranscript: (text: string, isFinal: boolean, isCandidate: boolean, interimText?: string, finalText?: string) => void;
   onSpeechStart: (speaker: 'ai' | 'candidate') => void;
   onSpeechEnd: (speaker: 'ai' | 'candidate', finalTranscript?: string) => void;
+  onAnswerAutoCompleted?: (finalAnswer: string) => void;
   onInterruption: () => void;
   onError: (error: VoiceError) => void;
 }

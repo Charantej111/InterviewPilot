@@ -14,7 +14,7 @@ import {
 import { cn } from '../../lib/utils';
 
 export interface MatchAnalysisStepProps {
-  matchResult: MatchAnalysisResult;
+  matchResult?: MatchAnalysisResult | null;
   onUpdateGapPriority: (gapId: string, priority: GapPriority) => void;
   onContinue: () => void;
   onBack: () => void;
@@ -26,6 +26,46 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
   onContinue,
   onBack,
 }) => {
+  if (!matchResult || matchResult.matchPercentage === null || matchResult.matchPercentage === undefined) {
+    return (
+      <div className="space-y-6 animate-fadeIn text-left">
+        {/* Section Header */}
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs font-semibold border border-zinc-200 dark:border-zinc-700">
+            <GitCompare size={13} className="text-zinc-500" />
+            <span>Stage 4 of 6 • Match Alignment</span>
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+            <ShiningText text="Resume × JD Match" />
+          </h2>
+          <p className="text-xs sm:text-sm text-foreground-muted">
+            Add a job description to see how your verified experience aligns with the role requirements.
+          </p>
+        </div>
+
+        <div className="p-8 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto text-zinc-500">
+            <GitCompare size={24} />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-foreground">No Job Description Provided</h3>
+            <p className="text-xs sm:text-sm text-foreground-muted max-w-md mx-auto">
+              Your interview will be dynamically grounded in your confirmed resume deliverables and technical ownership.
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center gap-3">
+            <Button variant="secondary" onClick={onBack}>
+              Back
+            </Button>
+            <Button onClick={onContinue} rightIcon={<ArrowRight size={16} />}>
+              Continue with Resume-Grounded Interview
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const { matchPercentage, deterministicBreakdown, matchingStrengths, actionableGaps, companyAlignmentSummary } = matchResult;
 
   return (

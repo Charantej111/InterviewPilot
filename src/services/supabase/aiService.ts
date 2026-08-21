@@ -644,15 +644,26 @@ Return JSON strictly matching this schema:
   },
 
   /**
-   * Step 4: Match & Gap Analyzer
-   * Evaluates fit using deterministic 45/30/25 scoring and surfaces prioritized actionable gaps.
-   * Strictly zero artificial score floor or baseline inflation.
+   * Step 4: Deterministic + Semantic Match Engine
+   * Returns null if job description is not provided.
    */
   async computeMatchAnalysis(
     candidateProfile: CandidateProfile,
-    jobProfile: JobProfile,
+    jobProfile?: JobProfile | null,
     companyResearch?: CompanyResearchData | null
-  ): Promise<MatchAnalysisResult> {
+  ): Promise<MatchAnalysisResult | null> {
+    if (!candidateProfile || !jobProfile) {
+      return null;
+    }
+
+    const hasSkills = Array.isArray(jobProfile.requiredSkills) && jobProfile.requiredSkills.length > 0;
+    const hasReqs = Array.isArray((jobProfile as any).requirements) && (jobProfile as any).requirements.length > 0;
+    const hasResps = Array.isArray(jobProfile.responsibilities) && jobProfile.responsibilities.length > 0;
+
+    if (!hasSkills && !hasReqs && !hasResps) {
+      return null;
+    }
+
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function

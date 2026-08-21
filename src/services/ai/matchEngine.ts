@@ -77,19 +77,31 @@ function findBestMatch(
   const reqSourceLower = requirement.sourceText.toLowerCase();
 
   // Flatten all candidate evidence items into searchable pool
+  const skills = model.skills || ({} as any);
+  const technical = Array.isArray(skills.technical) ? skills.technical : [];
+  const product = Array.isArray(skills.product) ? skills.product : [];
+  const domain = Array.isArray(skills.domain) ? skills.domain : [];
+  const soft = Array.isArray((skills as any).soft) ? (skills as any).soft : [];
+  const tools = Array.isArray((skills as any).tools) ? (skills as any).tools : [];
+  const workExp = Array.isArray(model.workExperience) ? model.workExperience : [];
+  const projects = Array.isArray(model.projects) ? model.projects : [];
+  const certifications = Array.isArray(model.certifications) ? model.certifications : [];
+
   const evidencePool: EvidenceItem[] = [
-    ...model.skills.technical,
-    ...model.skills.product,
-    ...model.skills.domain,
-    ...model.workExperience.flatMap((w) => [w.role, w.company, ...w.bullets]),
-    ...model.projects.flatMap((p) => [
+    ...technical,
+    ...product,
+    ...domain,
+    ...soft,
+    ...tools,
+    ...workExp.flatMap((w) => [w.role, w.company, ...(w.bullets || [])]),
+    ...projects.flatMap((p) => [
       p.name,
       ...(p.contribution ? [p.contribution] : []),
       ...(p.problem ? [p.problem] : []),
-      ...p.technologies,
-      ...p.outcomes,
+      ...(p.technologies || []),
+      ...(p.outcomes || []),
     ]),
-    ...model.certifications,
+    ...certifications,
   ].filter(Boolean) as EvidenceItem[];
 
   let bestMatch: EvidenceItem | undefined;
@@ -168,21 +180,29 @@ function buildExplanation(req: JDRequirement, verdict: MatchVerdict, evidence?: 
 // ─── Core Match Function ──────────────────────────────────────────────────────
 
 export function computeMatchAssessment(
-  lockedContext: LockedCandidateContext,
-  jdModel: JDEvidenceModel
-): MatchAssessment {
+  lockedContext?: LockedCandidateContext | null,
+  jdModel?: JDEvidenceModel | null
+): MatchAssessment | null {
+  if (!lockedContext?.evidenceModel || !jdModel) {
+    return null;
+  }
+
   const model = lockedContext.evidenceModel;
-  const criticalSet = new Set(jdModel.criticalCompetencies.map((c) => c.toLowerCase()));
+  const criticalSet = new Set((jdModel.criticalCompetencies || []).map((c) => c.toLowerCase()));
 
   // Gather all requirements from all categories
   const allRequirements: JDRequirement[] = [
-    ...jdModel.requiredSkills,
-    ...jdModel.technicalRequirements,
-    ...jdModel.responsibilities.slice(0, 5),  // top 5 responsibilities
-    ...jdModel.domainKnowledge,
-    ...jdModel.behavioralSignals.slice(0, 3),
-    ...jdModel.preferredSkills,
+    ...(jdModel.requiredSkills || []),
+    ...(jdModel.technicalRequirements || []),
+    ...(jdModel.responsibilities || []).slice(0, 5),  // top 5 responsibilities
+    ...(jdModel.domainKnowledge || []),
+    ...(jdModel.behavioralSignals || []).slice(0, 3),
+    ...(jdModel.preferredSkills || []),
   ];
+
+  if (allRequirements.length === 0) {
+    return null;
+  }
 
   // Deduplicate by sourceText
   const seen = new Set<string>();
@@ -350,3 +370,57 @@ export function buildLegacyMatchResult(assessment: MatchAssessment): MatchAnalys
     companyAlignmentSummary: `${assessment.directMatches.length} direct matches, ${assessment.transferableMatches.length} transferable, ${assessment.criticalGaps.length} critical gaps.`,
   };
 }
+
+/**
+ * Computes explicit MatchStateModel for state management.
+ * Returns status 'not_ready' with null percentage when JD or Resume is missing.
+ */
+export function computeMatchState(
+  lockedContext?: LockedCandidateContext | null,
+  jdModel?: JDEvidenceModel | null
+): import('../../types/matchAnalysis').MatchStateModel {
+  if (!lockedContext) {
+    return {
+      status: 'not_ready',
+      overallMatchPercent: null,
+      requirementMatches: [],
+      reason: 'RESUME_REQUIRED',
+      matchAssessment: null,
+    };
+  }
+
+  if (
+    !jdModel ||
+    (!jdModel.requiredSkills?.length &&
+      !jdModel.technicalRequirements?.length &&
+      !jdModel.responsibilities?.length &&
+      !jdModel.domainKnowledge?.length)
+  ) {
+    return {
+      status: 'not_ready',
+      overallMatchPercent: null,
+      requirementMatches: [],
+      reason: 'JOB_DESCRIPTION_REQUIRED',
+      matchAssessment: null,
+    };
+  }
+
+  const assessment = computeMatchAssessment(lockedContext, jdModel);
+  if (!assessment) {
+    return {
+      status: 'failed',
+      overallMatchPercent: null,
+      requirementMatches: [],
+      reason: 'ANALYSIS_FAILED',
+      matchAssessment: null,
+    };
+  }
+
+  return {
+    status: 'ready',
+    overallMatchPercent: assessment.overallMatchPercent,
+    requirementMatches: assessment.requirementMatches,
+    matchAssessment: assessment,
+  };
+}
+

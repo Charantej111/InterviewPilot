@@ -15,10 +15,12 @@ import {
   Play, 
   Building2, 
   Briefcase, 
-  AlertCircle,
   Clock,
   Flame,
   UserCheck,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { COMPANY_TRACKS } from '../data/companyTracks';
@@ -98,10 +100,14 @@ export const SetupPage: React.FC = () => {
     ]);
 
     try {
-      // 1. Analyze JD → JDEvidenceModel
-      setProcessingStage(`Deconstructing ${setupDraft.jobTitle} requirements...`);
-      const jdText = setupDraft.jobDescriptionText.trim() || `${setupDraft.jobTitle} at ${setupDraft.company}`;
-      await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
+      // 1. Analyze JD → JDEvidenceModel (only if JD text provided)
+      const jdText = (setupDraft.jobDescriptionText || '').trim();
+      if (jdText) {
+        setProcessingStage(`Deconstructing ${setupDraft.jobTitle} requirements...`);
+        await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, jdText);
+      } else {
+        await analyzeJobDescription(setupDraft.jobTitle, setupDraft.company, '');
+      }
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
@@ -111,13 +117,15 @@ export const SetupPage: React.FC = () => {
       ]);
 
       // 2. Company Research
-      setProcessingStage(`Gathering grounded ${setupDraft.company} intelligence...`);
-      await researchCompanyContext(
-        setupDraft.company,
-        setupDraft.jobTitle
-      );
+      if (setupDraft.company.trim()) {
+        setProcessingStage(`Gathering grounded ${setupDraft.company} intelligence...`);
+        await researchCompanyContext(
+          setupDraft.company,
+          setupDraft.jobTitle
+        );
+      }
 
-      // 3. Compute match using new engine if we have evidence models
+      // 3. Compute match using engine if we have JD evidence models
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
@@ -126,14 +134,17 @@ export const SetupPage: React.FC = () => {
       ]);
 
       const jdEvidenceModel = setupDraft.jdEvidenceModel;
-      if (setupDraft.lockedCandidateContext && jdEvidenceModel) {
+      if (setupDraft.lockedCandidateContext && jdEvidenceModel && jdText) {
         try {
-          const { computeMatchAssessment, buildLegacyMatchResult } = await import('../services/ai/matchEngine');
+          const { computeMatchAssessment, buildLegacyMatchResult, computeMatchState } = await import('../services/ai/matchEngine');
           const assessment = computeMatchAssessment(setupDraft.lockedCandidateContext, jdEvidenceModel);
-          const legacyResult = buildLegacyMatchResult(assessment);
-          updateSetupDraft({ matchAnalysis: legacyResult });
+          if (assessment) {
+            const legacyResult = buildLegacyMatchResult(assessment);
+            const matchState = computeMatchState(setupDraft.lockedCandidateContext, jdEvidenceModel);
+            updateSetupDraft({ matchAnalysis: legacyResult, matchState });
+          }
         } catch (matchErr) {
-          console.warn('Match engine failed, skipping match step:', matchErr);
+          console.warn('Match engine warning, continuing with zero-JD model:', matchErr);
         }
       }
 
@@ -141,19 +152,18 @@ export const SetupPage: React.FC = () => {
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
         { label: 'Requirement-level fit calculated', status: 'completed' },
-        { label: 'Preparing interview objectives...', status: 'in_progress' },
+        { label: 'Preparing interview simulation...', status: 'in_progress' },
       ]);
 
-      // 4. Prepare tailored interview
-      setProcessingStage('Calibrating tailored interview questions & rubric...');
+      // 4. Prepare tailored interview (sets tailoredQuestions = [] to stay opaque)
+      setProcessingStage('Calibrating adaptive interview environment...');
       await prepareTailoredInterview();
-
 
       setLoadingSteps([
         { label: `Deconstructed ${setupDraft.jobTitle} hiring bar`, status: 'completed' },
         { label: `Gathered ${setupDraft.company} context & verified facts`, status: 'completed' },
         { label: 'Requirement-level fit calculated', status: 'completed' },
-        { label: 'Interview objectives ready', status: 'completed' },
+        { label: 'Interview simulation ready', status: 'completed' },
       ]);
 
       setMode('ready');
@@ -409,11 +419,11 @@ export const SetupPage: React.FC = () => {
                   Simulation Calibrated
                 </span>
                 <h2 className="text-xl sm:text-2xl font-extrabold text-foreground mt-0.5">
-                  {setupDraft.jobTitle} · {setupDraft.company}
+                  {setupDraft.jobTitle || 'Adaptive Role'} · {setupDraft.company || 'Practice'}
                 </h2>
               </div>
 
-              {setupDraft.matchAnalysis && (
+              {setupDraft.jobDescriptionProvided && setupDraft.matchAnalysis && setupDraft.matchAnalysis.matchPercentage !== null && (
                 <div className="flex items-baseline gap-1.5 bg-zinc-100 dark:bg-zinc-800 px-3.5 py-1.5 rounded-xl self-start sm:self-auto">
                   <span className="text-xs text-foreground-muted font-semibold">Match:</span>
                   <span className="text-sm font-extrabold text-foreground font-mono">
@@ -423,32 +433,39 @@ export const SetupPage: React.FC = () => {
               )}
             </div>
 
-            {/* Focus Probes Overview */}
-            {setupDraft.tailoredQuestions && setupDraft.tailoredQuestions.length > 0 && (
-              <div className="space-y-2.5">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted">
-                  Prepared Anchor Topics ({setupDraft.tailoredQuestions.length})
-                </h4>
-                <div className="space-y-2">
-                  {setupDraft.tailoredQuestions.map((q, idx) => (
-                    <div
-                      key={q.id || idx}
-                      className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/80 text-xs flex items-start gap-2.5"
-                    >
-                      <span className="w-5 h-5 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                        {idx + 1}
-                      </span>
-                      <div className="space-y-0.5">
-                        <span className="font-bold text-foreground">{q.category}</span>
-                        <p className="text-foreground-muted text-[11px] leading-relaxed line-clamp-2">
-                          "{q.text}"
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+            {/* Opaque Simulation Grounding Dossier */}
+            <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/80 space-y-3">
+              <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                <Sparkles size={13} className="text-emerald-500" />
+                <span>Simulation Grounding Dossier:</span>
+              </span>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-foreground">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>Confirmed resume deliverables & technical ownership (Locked)</span>
                 </div>
+                {setupDraft.jobDescriptionProvided && setupDraft.jobDescriptionText ? (
+                  <div className="flex items-center gap-2 text-foreground">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>Deconstructed job description requirements & competency signals</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-foreground-muted">
+                    <span className="w-4 h-4 rounded-full border border-zinc-400 flex items-center justify-center text-[10px] shrink-0">·</span>
+                    <span>No JD provided — Resume-grounded adaptive interview</span>
+                  </div>
+                )}
+                {setupDraft.companyResearch ? (
+                  <div className="flex items-center gap-2 text-foreground">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>Verified {setupDraft.company} hiring committee intelligence</span>
+                  </div>
+                ) : null}
               </div>
-            )}
+              <p className="text-[11px] text-foreground-muted italic pt-1 border-t border-zinc-200/60 dark:border-zinc-700/60">
+                The interviewer will formulate dynamic questions in real time based directly on your responses.
+              </p>
+            </div>
 
             {/* Quick Segmented Controls */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">

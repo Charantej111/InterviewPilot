@@ -59,6 +59,16 @@ export interface MatchAssessment {
   criticalGaps: string[];               // missing or contradicted explicit requirements
 }
 
+export type MatchStatusState = 'not_ready' | 'analyzing' | 'ready' | 'failed';
+
+export interface MatchStateModel {
+  status: MatchStatusState;
+  overallMatchPercent: number | null;
+  requirementMatches: RequirementMatch[];
+  reason?: 'JOB_DESCRIPTION_REQUIRED' | 'RESUME_REQUIRED' | 'ANALYSIS_FAILED';
+  matchAssessment?: MatchAssessment | null;
+}
+
 // ─── Legacy Types (Backward Compat) ──────────────────────────────────────────
 
 export type MatchStatus = 'strong_match' | 'partial_match' | 'transferable_match' | 'weak_match' | 'unproven' | 'missing';

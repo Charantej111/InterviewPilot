@@ -92,9 +92,21 @@ export const matchAnalysisService = {
    */
   computeMatch(
     candidate: CandidateProfile,
-    job: JobProfile,
+    job?: JobProfile | null,
     company?: CompanyResearchData | null
-  ): MatchAnalysisResult {
+  ): MatchAnalysisResult | null {
+    if (!candidate || !job) {
+      return null;
+    }
+
+    const hasSkills = Array.isArray(job.requiredSkills) && job.requiredSkills.length > 0;
+    const hasReqs = Array.isArray((job as any).requirements) && (job as any).requirements.length > 0;
+    const hasResps = Array.isArray(job.responsibilities) && job.responsibilities.length > 0;
+
+    if (!hasSkills && !hasReqs && !hasResps) {
+      return null;
+    }
+
     const candidateSkillsLower = (candidate.skills || []).map((s) => s.toLowerCase());
     const candidateFullText = [
       candidate.summary || '',
@@ -108,7 +120,7 @@ export const matchAnalysisService = {
       .join(' ')
       .toLowerCase();
 
-    const requiredSkills = job.requiredSkills && job.requiredSkills.length > 0 ? job.requiredSkills : ['Core Technical Problem Solving'];
+    const requiredSkills: string[] = hasSkills ? job.requiredSkills! : ((job as any).requirements || []).slice(0, 5);
     const competencies = job.competencies && job.competencies.length > 0 ? job.competencies : ['Domain Execution'];
     const reqYears = parseRequiredYears(job.experienceRequirements);
     const candidateYears = parseCandidateYears(candidate);
@@ -121,7 +133,7 @@ export const matchAnalysisService = {
 
     // 1. Evaluate Hard Skills (45 max points)
     let matchedSkillsCount = 0;
-    requiredSkills.forEach((skill, idx) => {
+    requiredSkills.forEach((skill: string, idx: number) => {
       const skillLower = skill.toLowerCase().trim();
       const directMatch = candidateSkillsLower.some((cs) => cs === skillLower || (cs.length > 3 && skillLower.includes(cs)));
       const textMatch = candidateFullText.includes(skillLower);

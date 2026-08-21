@@ -125,21 +125,30 @@ export const InterviewPreviewPage: React.FC = () => {
             <div className="space-y-2 text-xs">
               <div className="flex items-center gap-2 text-foreground">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Your confirmed resume evidence & deliverable metrics (Locked)</span>
+                <span>Confirmed resume evidence & technical deliverables (Locked)</span>
               </div>
-              <div className="flex items-center gap-2 text-foreground">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Deconstructed job posting requirements & competency signals</span>
-              </div>
-              <div className="flex items-center gap-2 text-foreground">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Grounded {companyName} verified company context</span>
-              </div>
+              {setupDraft.jobDescriptionProvided && setupDraft.jobDescriptionText ? (
+                <div className="flex items-center gap-2 text-foreground">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Deconstructed job posting requirements & competency signals</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-foreground-muted">
+                  <span className="w-4 h-4 rounded-full border border-zinc-400 flex items-center justify-center text-[10px] shrink-0">·</span>
+                  <span>No JD provided — You can add a job description to enable role-specific matching and interview calibration</span>
+                </div>
+              )}
+              {setupDraft.companyResearch ? (
+                <div className="flex items-center gap-2 text-foreground">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Verified {companyName} company context</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
           <p className="text-xs text-foreground-muted italic leading-relaxed text-center sm:text-left">
-            The interviewer will formulate dynamic questions and follow-ups based directly on what you answer.
+            The interviewer will decide what to ask dynamically based on your responses.
           </p>
         </div>
 

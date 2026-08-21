@@ -1,5 +1,6 @@
 import { runComprehensive25ScenarioTests } from './aiPipeline.test';
 import { runResumeIntelligenceTests } from './resumeIntelligence.test';
+import { runInterviewIntegrityAndVoiceTests } from './interviewIntegrityAndVoice.test';
 
 console.log('====================================================');
 console.log('  RUNNING INTERVIEWPILOT ENGINE REGRESSION TEST SUITE  ');
@@ -11,8 +12,11 @@ const aiPipelineResults = runComprehensive25ScenarioTests();
 console.log('\n--- 2. Testing Resume Intelligence & Evidence Extraction Pipeline ---');
 const resumeResults = runResumeIntelligenceTests();
 
-const totalPassed = aiPipelineResults.passed + resumeResults.passed;
-const totalFailed = aiPipelineResults.failed + resumeResults.failed;
+console.log('\n--- 3. Testing Zero-JD Match State & Conversational Voice Architecture ---');
+const voiceIntegrityResults = runInterviewIntegrityAndVoiceTests();
+
+const totalPassed = aiPipelineResults.passed + resumeResults.passed + voiceIntegrityResults.passed;
+const totalFailed = aiPipelineResults.failed + resumeResults.failed + voiceIntegrityResults.failed;
 
 console.log('\n====================================================');
 console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);

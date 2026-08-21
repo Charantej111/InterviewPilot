@@ -9,6 +9,7 @@ import { InterviewCompletionScreen } from '../components/interview/InterviewComp
 import { ExitConfirmModal } from '../components/interview/ExitConfirmModal';
 import { AlertTriangle, ArrowRight, Clock, ShieldAlert } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import { DebugTelemetryPanel } from '../components/interview/DebugTelemetryPanel';
 
 export const InterviewRoomPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -300,6 +301,9 @@ export const InterviewRoomPage: React.FC = () => {
         onClose={() => setIsExitModalOpen(false)}
         onConfirmExit={handleConfirmExit}
       />
+
+      {/* Observability Telemetry Overlay (?debug=true) */}
+      <DebugTelemetryPanel />
     </DarkGradientBg>
   );
 };
