@@ -1,11 +1,27 @@
 import { runComprehensive25ScenarioTests } from './aiPipeline.test';
+import { runResumeIntelligenceTests } from './resumeIntelligence.test';
 
-const results = runComprehensive25ScenarioTests();
+console.log('====================================================');
+console.log('  RUNNING INTERVIEWPILOT ENGINE REGRESSION TEST SUITE  ');
+console.log('====================================================\n');
 
-if (results.failed > 0) {
-  console.error(`💥 ${results.failed} scenarios failed verification!`);
+console.log('--- 1. Testing AI Pipeline & Evaluation Engine ---');
+const aiPipelineResults = runComprehensive25ScenarioTests();
+
+console.log('\n--- 2. Testing Resume Intelligence & Evidence Extraction Pipeline ---');
+const resumeResults = runResumeIntelligenceTests();
+
+const totalPassed = aiPipelineResults.passed + resumeResults.passed;
+const totalFailed = aiPipelineResults.failed + resumeResults.failed;
+
+console.log('\n====================================================');
+console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);
+console.log('====================================================');
+
+if (totalFailed > 0) {
+  console.error(`💥 ${totalFailed} tests failed!`);
   process.exit(1);
 } else {
-  console.log(`🎉 ALL ${results.passed} AI PIPELINE SCENARIOS PASSED WITH 100% SUCCESS!`);
+  console.log(`🎉 ALL ${totalPassed} TESTS & REGRESSION SCENARIOS PASSED WITH 100% SUCCESS!`);
   process.exit(0);
 }

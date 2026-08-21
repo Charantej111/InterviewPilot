@@ -3,14 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, MessageSquare, Sparkles } from 'lucide-react';
 import { getScoreColor } from '../../lib/utils';
 
-export interface QuestionBreakdownItem {
-  questionId: string;
-  questionText: string;
-  category: string;
-  score: number;
-  userAnswer: string;
-  keyCritique: string;
-}
+import { QuestionBreakdownItem } from '../../types/interview';
+export type { QuestionBreakdownItem };
 
 export interface QuestionAccordionListProps {
   questions: QuestionBreakdownItem[];

@@ -31,6 +31,21 @@ import { interviewBrain } from '../services/ai/interviewBrain';
 import { storage } from '../lib/storage';
 
 
+export interface ExtractionDebugSnapshot {
+  rawText: string;
+  normalizedText: string;
+  sections: import('../types/resume').ExtractedSection[];
+  lineBlocks: import('../types/resume').LineBlock[];
+  detectedProjects: import('../types/resume').ExtractedProjectBlock[];
+  detectedEducation: import('../types/resume').ExtractedEducationBlock[];
+  rawGeminiOutput?: any;
+  validatedEvidence: import('../types/resume').CandidateEvidenceModel;
+  rejectedEvidence: { value: string; reason: string; section?: string }[];
+  derivedProfile: CandidateProfile;
+  characterCount: number;
+  pageCount?: number;
+}
+
 export interface SetupDraft {
   resumeId?: string;
   resumeName: string;
@@ -40,6 +55,7 @@ export interface SetupDraft {
   // Evidence pipeline (new — supercedes candidateProfile as source of truth)
   candidateEvidenceModel: CandidateEvidenceModel | null;
   lockedCandidateContext: LockedCandidateContext | null;
+  extractionDebugSnapshot?: ExtractionDebugSnapshot | null;
   jobDescriptionId?: string;
   jobTitle: string;
   company: string;
@@ -210,7 +226,22 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const uploadResumeFile = async (file: File) => {
-    let record: any = { id: `res_${Date.now()}`, fileName: file.name, fileSizeFormatted: `${Math.round(file.size / 1024)} KB` };
+    const extractionId = `ext_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+    // Immediately isolate and purge all previous extraction data
+    updateSetupDraft({
+      resumeId: extractionId,
+      resumeName: file.name,
+      resumeFileSize: `${Math.round(file.size / 1024)} KB`,
+      resumeParsed: false,
+      candidateProfile: null as any,
+      candidateEvidenceModel: null as any,
+      lockedCandidateContext: null,
+      matchAnalysis: null,
+      tailoredQuestions: [],
+    });
+
+    let record: any = { id: extractionId, fileName: file.name, fileSizeFormatted: `${Math.round(file.size / 1024)} KB` };
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
       try {
         record = await resumeService.uploadResume(file);
@@ -219,27 +250,41 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     }
 
-    // Run the new evidence pipeline (normalize → section detect → classify gate → Gemini)
-    // Stores evidence model in draft so ResumeIntelligencePage can display it.
-    // lockedCandidateContext is NOT set here — it's set in confirmCandidateProfile().
-    const { evidenceModel } = await aiService.extractResumeEvidence(file);
+    // Run the evidence pipeline (normalize → section detect → project/education segment → classify gate → Gemini / deterministic validator)
+    const extractionRes = await aiService.extractResumeEvidence(file);
+    const evidenceModel = extractionRes.evidenceModel;
     const derivedProfile = resumeService.deriveProfileFromEvidence(evidenceModel);
 
+    const debugSnapshot: ExtractionDebugSnapshot = {
+      rawText: extractionRes.extractedDoc?.rawText || '',
+      normalizedText: extractionRes.extractedDoc?.normalizedText || '',
+      sections: extractionRes.extractedDoc?.sections || [],
+      lineBlocks: extractionRes.extractedDoc?.lineBlocks || [],
+      detectedProjects: extractionRes.extractedDoc?.detectedProjects || [],
+      detectedEducation: extractionRes.extractedDoc?.detectedEducation || [],
+      rawGeminiOutput: (extractionRes as any).rawGeminiOutput,
+      validatedEvidence: evidenceModel,
+      rejectedEvidence: extractionRes.validationResult?.rejectedItems || [],
+      derivedProfile,
+      characterCount: extractionRes.extractedDoc?.characterCount || 0,
+      pageCount: extractionRes.extractedDoc?.pageCount || 1,
+    };
 
     updateSetupDraft({
-      resumeId: record.id,
+      resumeId: record.id || extractionId,
       resumeName: record.fileName || file.name,
-      resumeFileSize: record.fileSizeFormatted,
+      resumeFileSize: record.fileSizeFormatted || `${Math.round(file.size / 1024)} KB`,
       resumeParsed: true,
       candidateProfile: derivedProfile,
       candidateEvidenceModel: evidenceModel,
       lockedCandidateContext: null,   // not locked until candidate confirms
+      extractionDebugSnapshot: debugSnapshot,
       matchAnalysis: null,
       tailoredQuestions: [],
     });
 
     return {
-      resumeId: record.id,
+      resumeId: record.id || extractionId,
       fileName: record.fileName || file.name,
       fileSize: record.fileSizeFormatted,
       profile: derivedProfile,

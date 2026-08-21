@@ -18,10 +18,10 @@ import {
   AlertCircle,
   Clock,
   Flame,
-  UserCheck
+  UserCheck,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { COMPANY_TRACKS, CompanyTrack } from '../data/companyTracks';
+import { COMPANY_TRACKS } from '../data/companyTracks';
 
 export const SetupPage: React.FC = () => {
   const navigate = useNavigate();

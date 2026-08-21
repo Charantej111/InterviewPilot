@@ -23,7 +23,7 @@ import {
   Building2,
   FileText,
 } from 'lucide-react';
-import type { CandidateEvidenceModel, EvidenceItem, EvidenceConfidence } from '../types/resume';
+import type { CandidateEvidenceModel, EvidenceConfidence } from '../types/resume';
 
 export const ResumeIntelligencePage: React.FC = () => {
   const navigate = useNavigate();
@@ -152,15 +152,15 @@ export const ResumeIntelligencePage: React.FC = () => {
         );
       case 'medium':
         return (
-          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-            Interpreted
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+            Source verified
           </span>
         );
       case 'inferred':
         return (
-          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
             <AlertTriangle size={10} />
-            Needs Confirmation
+            Needs Review
           </span>
         );
       default:
@@ -168,13 +168,21 @@ export const ResumeIntelligencePage: React.FC = () => {
     }
   };
 
+  const isDebugMode = typeof window !== 'undefined' && window.location.search.includes('resumeDebug=true');
+  const [showDebug, setShowDebug] = useState(false);
+
   const initials = candidateName
-    .split(' ')
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase() || 'CP';
+    ? candidateName
+        .split(' ')
+        .map((w) => w[0])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'CD';
+
+  const totalSkillsCount = technicalSkills.length + productSkills.length + domainSkills.length;
+  const totalAchievementsCount = certifications.length + achievements.length;
 
   return (
     <DashboardLayout>
@@ -195,6 +203,14 @@ export const ResumeIntelligencePage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            {isDebugMode && (
+              <button
+                onClick={() => setShowDebug(!showDebug)}
+                className="px-2.5 py-1 text-xs font-mono font-bold bg-purple-500/10 border border-purple-500/30 text-purple-400 rounded-lg hover:bg-purple-500/20 transition-colors"
+              >
+                {showDebug ? 'Hide Pipeline Debug' : 'Show Pipeline Debug'}
+              </button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -216,13 +232,77 @@ export const ResumeIntelligencePage: React.FC = () => {
           </div>
         </div>
 
+        {/* Comprehensive Real-World Pipeline Diagnostic Overlay (?resumeDebug=true) */}
+        {isDebugMode && showDebug && (
+          <div className="p-6 rounded-3xl bg-zinc-950 border border-purple-500/40 text-white font-mono text-xs space-y-5 shadow-2xl animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <span className="text-purple-400 font-bold uppercase tracking-wider">🔬 Extraction Pipeline Diagnostic Overlay</span>
+              <span className="text-zinc-500 text-[11px]">Extraction ID: {setupDraft.resumeId || 'Active'}</span>
+            </div>
+
+            {/* Pipeline Stage Counts Matrix */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px]">
+              <div>
+                <span className="text-zinc-500 block">Raw Characters:</span>
+                <span className="font-bold text-white">{setupDraft.extractionDebugSnapshot?.characterCount || setupDraft.resumeFileSize}</span>
+              </div>
+              <div>
+                <span className="text-zinc-500 block">Line Blocks:</span>
+                <span className="font-bold text-white">{setupDraft.extractionDebugSnapshot?.lineBlocks.length || 0}</span>
+              </div>
+              <div>
+                <span className="text-zinc-500 block">Detected Projects:</span>
+                <span className="font-bold text-emerald-400">{setupDraft.extractionDebugSnapshot?.detectedProjects.length || projects.length}</span>
+              </div>
+              <div>
+                <span className="text-zinc-500 block">Detected Education:</span>
+                <span className="font-bold text-blue-400">{setupDraft.extractionDebugSnapshot?.detectedEducation.length || education.length}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* 1. Line Blocks */}
+              <div className="space-y-1.5">
+                <span className="text-zinc-400 font-bold">1. Reconstructed Line Blocks (First 30)</span>
+                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-zinc-300">
+                  {(setupDraft.extractionDebugSnapshot?.lineBlocks || []).slice(0, 30).map((b) => `[L${b.lineNumber}] [${b.section || 'N/A'}] ${b.text}`).join('\n') || 'No line blocks captured'}
+                </pre>
+              </div>
+
+              {/* 2. Detected Project Blocks */}
+              <div className="space-y-1.5">
+                <span className="text-zinc-400 font-bold">2. Pre-Segmented Project Blocks ({setupDraft.extractionDebugSnapshot?.detectedProjects.length || 0})</span>
+                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-emerald-400">
+                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.detectedProjects || [], null, 2)}
+                </pre>
+              </div>
+
+              {/* 3. Detected Education Blocks */}
+              <div className="space-y-1.5">
+                <span className="text-zinc-400 font-bold">3. Pre-Segmented Education Blocks ({setupDraft.extractionDebugSnapshot?.detectedEducation.length || 0})</span>
+                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-blue-400">
+                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.detectedEducation || [], null, 2)}
+                </pre>
+              </div>
+
+              {/* 4. Rejected Evidence with Provenance Reasons */}
+              <div className="space-y-1.5">
+                <span className="text-zinc-400 font-bold">4. Rejected Items & Provenance Audit ({setupDraft.extractionDebugSnapshot?.rejectedEvidence.length || 0})</span>
+                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-rose-400">
+                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.rejectedEvidence || [], null, 2)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Real Measurable Reading Status Bar */}
         <div className="p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80">
           <h3 className="text-xs font-bold text-foreground mb-3 flex items-center gap-2">
             <FileText size={14} className="text-primary" />
             <span>Resume Reading & Evidence Status</span>
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
             <div className="flex items-center gap-2 text-foreground">
               <Check size={14} className="text-emerald-500 shrink-0" />
               <span><strong>{workExperience.length}</strong> Experience Roles</span>
@@ -233,11 +313,15 @@ export const ResumeIntelligencePage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2 text-foreground">
               <Check size={14} className="text-emerald-500 shrink-0" />
-              <span><strong>{technicalSkills.length + productSkills.length + domainSkills.length}</strong> Skills Calibrated</span>
+              <span><strong>{totalSkillsCount}</strong> Skills Detected</span>
             </div>
             <div className="flex items-center gap-2 text-foreground">
               <Check size={14} className="text-emerald-500 shrink-0" />
-              <span><strong>{education.length}</strong> Education Items</span>
+              <span><strong>{education.length}</strong> Education Entries</span>
+            </div>
+            <div className="flex items-center gap-2 text-foreground">
+              <Check size={14} className="text-emerald-500 shrink-0" />
+              <span><strong>{totalAchievementsCount}</strong> Achievements</span>
             </div>
           </div>
         </div>

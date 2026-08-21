@@ -175,13 +175,13 @@ export const SettingsPage: React.FC = () => {
                   <label className="text-xs font-bold text-foreground">Seniority Benchmark</label>
                   <select
                     value={experienceLevel}
-                    onChange={(e) => setExperienceLevel(e.target.value)}
+                    onChange={(e) => setExperienceLevel(e.target.value as any)}
                     className="w-full h-10 px-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 text-xs font-semibold text-foreground outline-none focus:border-primary"
                   >
-                    <option value="Entry / Early Career (0-2 yrs)">Entry / Early Career (0-2 yrs)</option>
-                    <option value="Mid-level (2-5 yrs)">Mid-level (2-5 yrs)</option>
-                    <option value="Senior (5-8 yrs)">Senior (5-8 yrs)</option>
-                    <option value="Staff / Principal / Director (8+ yrs)">Staff / Principal / Director (8+ yrs)</option>
+                    <option value="Entry / Intern">Entry / Intern</option>
+                    <option value="Mid-level">Mid-level</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Lead / Director">Lead / Director</option>
                   </select>
                 </div>
               </div>

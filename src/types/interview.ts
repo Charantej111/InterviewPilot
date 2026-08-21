@@ -265,8 +265,19 @@ export interface DeliveryObservation {
   deliveryScore: number; // 0 - 10 separate coaching metric
 }
 
+export interface QuestionBreakdownItem {
+  questionId: string;
+  questionText: string;
+  category: string;
+  score: number;
+  userAnswer: string;
+  keyCritique: string;
+  answerClassification?: AnswerClassification;
+}
+
 export interface FinalReport {
   id: string;
+  interviewId?: string;
   sessionId: string;
   createdAt: string;
   jobTitle: string;
@@ -291,13 +302,5 @@ export interface FinalReport {
     description: string;
     actionableTask: string;
   }[];
-  questionBreakdown: {
-    questionId: string;
-    questionText: string;
-    category: string;
-    score: number;
-    userAnswer: string;
-    keyCritique: string;
-    answerClassification?: AnswerClassification;
-  }[];
+  questionBreakdown: QuestionBreakdownItem[];
 }

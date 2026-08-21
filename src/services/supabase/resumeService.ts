@@ -229,7 +229,7 @@ export const resumeService = {
   deriveProfileFromEvidence(model: CandidateEvidenceModel): CandidateProfile {
     if (!model) {
       return {
-        name: 'Candidate',
+        name: '',
         summary: '',
         education: [],
         experience: [],
@@ -247,10 +247,10 @@ export const resumeService = {
     const domainSkills = (model.skills?.domain || []).map((s) => s?.value || String(s)).filter(Boolean);
     const allSkills = [...techSkills, ...prodSkills, ...domainSkills];
 
-    const candidateName = (model.identity?.name?.value || 'Candidate')
+    const candidateName = (model.identity?.name?.value || '')
       .replace(/\[SECTION:[^\]]*\]/gi, '')
       .replace(/\[PAGE\s*\d+\]/gi, '')
-      .trim() || 'Candidate';
+      .trim();
     const primaryRole = model.workExperience?.[0]?.role?.value;
     const primaryCompany = model.workExperience?.[0]?.company?.value;
     const summary = primaryRole && primaryCompany
@@ -272,7 +272,7 @@ export const resumeService = {
         highlights: (w?.bullets || []).map((b) => b?.value || String(b)).filter(Boolean),
       })),
       projects: (model.projects || []).map((p) => ({
-        name: p?.name?.value || 'Project',
+        name: p?.name?.value || '',
         description: p?.contribution?.value || p?.problem?.value || '',
         technologies: (p?.technologies || []).map((t) => t?.value || String(t)).filter(Boolean),
         metrics: p?.outcomes?.[0]?.value || '',

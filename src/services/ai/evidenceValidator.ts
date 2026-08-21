@@ -2,401 +2,408 @@ import type {
   CandidateEvidenceModel,
   EvidenceItem,
   ValidationResult,
-  ValidationIssue,
+  WorkExperienceEvidence,
+  ProjectEvidence,
+  EducationEvidence,
 } from '../../types/resume';
 
-// ─── Skill Canonicalization & Synonym Normalization ──────────────────────────
-
-const SKILL_SYNONYMS: Record<string, string> = {
-  'react.js': 'React',
-  'reactjs': 'React',
-  'node.js': 'Node.js',
-  'nodejs': 'Node.js',
-  'vue.js': 'Vue.js',
-  'vuejs': 'Vue.js',
-  'next.js': 'Next.js',
-  'nextjs': 'Next.js',
-  'postgres': 'PostgreSQL',
-  'postgresql': 'PostgreSQL',
-  'golang': 'Go',
-  'k8s': 'Kubernetes',
-  'amazon web services': 'AWS',
-  'google cloud platform': 'GCP',
-  'lang chain': 'LangChain',
-  'lang graph': 'LangGraph',
-  'scikit learn': 'scikit-learn',
-  'sklearn': 'scikit-learn',
-  'restful apis': 'REST APIs',
-  'rest api': 'REST APIs',
-  'rest apis': 'REST APIs',
-  'ci cd': 'CI/CD',
-  'ci/cd pipeline': 'CI/CD',
-  'ui ux': 'UI/UX Design',
-  'ui/ux': 'UI/UX Design',
-};
-
 /**
- * Normalizes text for robust fuzzy substring and keyword matching.
+ * Normalizes text for lenient provenance matching (removes excess whitespace & punctuation).
  */
-function normalizeForMatch(str: string): string {
-  return str
+function normalizeForMatching(text: string): string {
+  return (text || '')
     .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 /**
- * Checks if sourceText exists in the normalized document with fuzzy word overlap.
+ * Checks whether a claimed value or phrase is grounded in the source text.
  */
-function verifySourceTextPresence(sourceText: string, docText: string): 'SUPPORTED' | 'PARTIALLY_SUPPORTED' | 'UNSUPPORTED' {
-  if (!sourceText || sourceText.trim().length === 0) {
-    return 'UNSUPPORTED';
-  }
+function isPhraseInSourceText(phrase: string, sourceText: string): boolean {
+  if (!phrase || !sourceText) return false;
+  const normPhrase = normalizeForMatching(phrase);
+  const normSource = normalizeForMatching(sourceText);
 
-  const normSource = normalizeForMatch(sourceText);
-  const normDoc = normalizeForMatch(docText);
+  if (normPhrase.length === 0) return false;
+  if (normSource.includes(normPhrase)) return true;
 
-  // Exact normalized match
-  if (normDoc.includes(normSource)) {
-    return 'SUPPORTED';
-  }
+  // Word set subset check for multi-word phrases
+  const phraseWords = normPhrase.split(' ').filter((w) => w.length > 2);
+  if (phraseWords.length === 0) return false;
 
-  // Token-level matching (handles line breaks or slight formatting variance)
-  const sourceTokens = normSource.split(' ').filter((t) => t.length > 3);
-  if (sourceTokens.length === 0) {
-    return normDoc.includes(normSource) ? 'SUPPORTED' : 'UNSUPPORTED';
-  }
-
-  const matchedTokens = sourceTokens.filter((token) => normDoc.includes(token));
-  const matchRatio = matchedTokens.length / sourceTokens.length;
-
-  if (matchRatio >= 0.7) {
-    return 'SUPPORTED';
-  } else if (matchRatio >= 0.4) {
-    return 'PARTIALLY_SUPPORTED';
-  }
-
-  return 'UNSUPPORTED';
+  const matchedWords = phraseWords.filter((w) => normSource.includes(w));
+  return matchedWords.length / phraseWords.length >= 0.75;
 }
 
 /**
- * Checks if extracted value is reasonably supported by the source text.
+ * Validates whether a project name is a legitimate title or an illegitimate sentence fragment/bullet.
  */
-function isValueSupportedBySource(value: string, sourceText: string): boolean {
-  if (!value || !sourceText) return false;
-  const normVal = normalizeForMatch(value);
-  const normSource = normalizeForMatch(sourceText);
+function isValidProjectTitle(name: string): { valid: boolean; reason?: string } {
+  const trimmed = (name || '').trim();
+  if (!trimmed || trimmed.length < 3) {
+    return { valid: false, reason: 'Project name is empty or too short' };
+  }
 
-  // Direct containment
-  if (normSource.includes(normVal)) return true;
+  // Reject if ends with a sentence period
+  if (/\.\s*$/.test(trimmed)) {
+    return { valid: false, reason: 'Sentence ending with period cannot be a project title' };
+  }
 
-  // Key word overlap (e.g. "Chief Marketing Officer" in "Co-founder & CMO / Marketing")
-  const valTokens = normVal.split(' ').filter((t) => t.length > 2);
-  if (valTokens.length === 0) return true;
+  // Reject if starts with an action verb (indicates it is a bullet point sentence, not a project name)
+  if (/^(developed|implemented|engineered|designed|supervised|created|built|utilized|handled|analyzed|evaluated|achieved|trained|fine-tuned|deployed|assisted|led|wrote|built|tested)\b/i.test(trimmed)) {
+    return { valid: false, reason: 'Action verb sentence cannot be a project title' };
+  }
 
-  const overlap = valTokens.some((token) => normSource.includes(token));
-  return overlap;
+  // Reject if it is a generic technology name
+  if (/^(python|javascript|typescript|c\+\+|java|react|node\.js|html|css|sql|pandas|numpy|docker|aws|git)$/i.test(trimmed)) {
+    return { valid: false, reason: 'Single technology name cannot be a project title' };
+  }
+
+  // Reject if starts with bullet characters
+  if (/^[•*-]\s*/.test(trimmed)) {
+    return { valid: false, reason: 'Bullet point line cannot be a project title' };
+  }
+
+  return { valid: true };
 }
 
 /**
- * Validates date ranges and flags inconsistent or future dates.
+ * Validates whether an education entry is valid or an illegitimate isolated grade/character.
  */
-function validateDateRange(startDate?: string, endDate?: string, fieldPath = ''): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!startDate && !endDate) return issues;
+function isValidEducationRecord(degree?: string, institution?: string): { valid: boolean; reason?: string } {
+  const cleanDegree = (degree || '').trim();
+  const cleanInst = (institution || '').trim();
 
-  const currentYear = new Date().getFullYear();
-  const extractYear = (d: string) => {
-    const m = d.match(/\b(20\d\d|19\d\d)\b/);
-    return m ? parseInt(m[1], 10) : null;
-  };
-
-  const startYr = startDate ? extractYear(startDate) : null;
-  const endYr = endDate && !/present|current/i.test(endDate) ? extractYear(endDate) : null;
-
-  if (startYr && endYr && startYr > endYr) {
-    issues.push({
-      type: 'invalid_date',
-      severity: 'warning',
-      field: fieldPath,
-      message: `Start date (${startDate}) appears after end date (${endDate}).`,
-    });
+  if (!cleanDegree && !cleanInst) {
+    return { valid: false, reason: 'Education record has neither degree nor institution' };
   }
 
-  if (startYr && startYr > currentYear + 2) {
-    issues.push({
-      type: 'invalid_date',
-      severity: 'warning',
-      field: fieldPath,
-      message: `Start date (${startDate}) is in the future.`,
-    });
+  // Reject if degree or institution is ONLY a CGPA / grade string
+  if (/^(?:cgpa|gpa|percentage|marks)?\s*[:=]?\s*\d+(?:\.\d+)?(?:\s*\/\s*10|\s*%)?$/i.test(cleanDegree)) {
+    return { valid: false, reason: 'Isolated CGPA or grade string cannot be an Education entity' };
+  }
+  if (/^(?:cgpa|gpa|percentage|marks)?\s*[:=]?\s*\d+(?:\.\d+)?(?:\s*\/\s*10|\s*%)?$/i.test(cleanInst)) {
+    return { valid: false, reason: 'Isolated CGPA or grade string cannot be an Education entity' };
   }
 
-  return issues;
+  // Reject single letter fragments
+  if (cleanDegree.length === 1 && !cleanInst) {
+    return { valid: false, reason: 'Single character fragment cannot be an Education entity' };
+  }
+
+  return { valid: true };
 }
 
 /**
- * Validates and deduplicates skills while preserving canonical names and source evidence.
+ * Validates whether a work experience role is backed by verifiable employer provenance.
  */
-function deduplicateSkills(skills: EvidenceItem[]): { deduplicated: EvidenceItem[]; duplicatesCount: number } {
-  const seenCanonical = new Map<string, EvidenceItem>();
-  let duplicatesCount = 0;
+function isValidWorkExperience(company?: string, role?: string, sourceText?: string): { valid: boolean; reason?: string } {
+  const cleanCompany = (company || '').trim();
+  const cleanRole = (role || '').trim();
 
-  for (const item of skills) {
-    if (!item.value || item.value.trim().length === 0) continue;
+  if (!cleanCompany && !cleanRole) {
+    return { valid: false, reason: 'Work experience has no company and no role' };
+  }
 
-    const lower = item.value.toLowerCase().trim();
-    const canonical = SKILL_SYNONYMS[lower] || item.value.trim();
-    const canonicalKey = canonical.toLowerCase();
+  // Reject synthetic placeholder companies
+  if (/^(previous organization|company|organization|employer|workplace|tech firm)$/i.test(cleanCompany)) {
+    return { valid: false, reason: 'Synthetic placeholder company rejected' };
+  }
 
-    if (seenCanonical.has(canonicalKey)) {
-      duplicatesCount += 1;
-      const existing = seenCanonical.get(canonicalKey)!;
-      // Upgrade confidence if duplicate had stronger evidence
-      if (item.confidence === 'high' && existing.confidence !== 'high') {
-        existing.confidence = 'high';
-        existing.sourceText = item.sourceText;
-      }
-    } else {
-      seenCanonical.set(canonicalKey, {
-        ...item,
-        value: canonical,
-      });
+  // Reject synthetic placeholder roles
+  if (/^(technical professional|software engineer|developer|professional)$/i.test(cleanRole) && !cleanCompany) {
+    return { valid: false, reason: 'Generic role without verified employer rejected' };
+  }
+
+  if (sourceText && cleanCompany) {
+    if (!isPhraseInSourceText(cleanCompany, sourceText)) {
+      return { valid: false, reason: `Company "${cleanCompany}" not found in source resume text` };
     }
   }
 
-  return {
-    deduplicated: Array.from(seenCanonical.values()),
-    duplicatesCount,
-  };
+  return { valid: true };
 }
 
-// ─── Primary Evidence Validator ──────────────────────────────────────────────
-
+/**
+ * Strict post-extraction grounding and semantic entity-type validator.
+ * Unsupported claims or structural fragments are strictly rejected and stripped.
+ */
 export function validateCandidateEvidenceModel(
   rawModel: CandidateEvidenceModel,
-  normalizedText: string
+  fullDocumentText: string
 ): ValidationResult {
-  const issues: ValidationIssue[] = [];
-  const repairedFields: string[] = [];
+  const warnings: string[] = [];
+  const rejectedItems: { value: string; reason: string; section?: string }[] = [];
 
-  let totalItems = 0;
-  let supportedCount = 0;
-  let partiallySupportedCount = 0;
-  let unsupportedCount = 0;
-  let highConfidenceCount = 0;
-  let mediumConfidenceCount = 0;
-  let lowConfidenceCount = 0;
-  let inferredCount = 0;
+  // 1. Identity Validation
+  const validatedIdentity: CandidateEvidenceModel['identity'] = {};
 
-  // Clone model for clean mutation
-  const model: CandidateEvidenceModel = {
-    identity: { ...(rawModel?.identity || {}) },
-    education: [...(rawModel?.education || [])],
-    workExperience: [...(rawModel?.workExperience || [])],
-    projects: [...(rawModel?.projects || [])],
-    skills: {
-      technical: [...(rawModel?.skills?.technical || [])],
-      product: [...(rawModel?.skills?.product || [])],
-      domain: [...(rawModel?.skills?.domain || [])],
-    },
-    certifications: [...(rawModel?.certifications || [])],
-    achievements: [...(rawModel?.achievements || [])],
-    unclear: [...(rawModel?.unclear || [])],
-  };
-
-  const validateItem = (item: EvidenceItem | undefined, fieldPath: string): EvidenceItem | undefined => {
-    if (!item) return undefined;
-    totalItems += 1;
-
-    const val = item.value?.trim() || '';
-    const src = item.sourceText?.trim() || '';
-
-    if (!val) {
-      issues.push({
-        type: 'missing_source',
-        severity: 'error',
-        field: fieldPath,
-        message: `Empty value in ${fieldPath}.`,
+  if (rawModel.identity?.name?.value) {
+    const nameVal = rawModel.identity.name.value.trim();
+    if (isPhraseInSourceText(nameVal, fullDocumentText)) {
+      validatedIdentity.name = {
+        ...rawModel.identity.name,
+        confidence: 'high',
+      };
+    } else {
+      rejectedItems.push({
+        value: nameVal,
+        reason: 'Candidate name not found in source text',
+        section: 'HEADER',
       });
-      return undefined;
     }
+  }
 
-    // Verify source text existence in document
-    const sourceStatus = verifySourceTextPresence(src, normalizedText);
-    const valueSupported = isValueSupportedBySource(val, src);
-
-    if (sourceStatus === 'UNSUPPORTED' || !valueSupported) {
-      unsupportedCount += 1;
-      issues.push({
-        type: 'unsupported_value',
-        severity: 'warning',
-        field: fieldPath,
-        message: `Extracted '${val}' could not be verified in resume text.`,
+  if (rawModel.identity?.email?.value) {
+    const emailVal = rawModel.identity.email.value.trim();
+    if (isPhraseInSourceText(emailVal, fullDocumentText)) {
+      validatedIdentity.email = {
+        ...rawModel.identity.email,
+        confidence: 'high',
+      };
+    } else {
+      rejectedItems.push({
+        value: emailVal,
+        reason: 'Email not found in source text',
+        section: 'HEADER',
       });
-      return {
-        ...item,
-        confidence: 'low',
+    }
+  }
+
+  if (rawModel.identity?.role?.value) {
+    const roleVal = rawModel.identity.role.value.trim();
+    if (isPhraseInSourceText(roleVal, fullDocumentText)) {
+      validatedIdentity.role = {
+        ...rawModel.identity.role,
+        confidence: 'high',
       };
     }
+  }
 
-    if (sourceStatus === 'PARTIALLY_SUPPORTED') {
-      partiallySupportedCount += 1;
-      return {
-        ...item,
-        confidence: item.confidence === 'high' ? 'medium' : item.confidence,
-      };
+  // 2. Work Experience Validation (Strict employer provenance)
+  const validatedWorkExperience: WorkExperienceEvidence[] = [];
+
+  for (const exp of rawModel.workExperience || []) {
+    const companyVal = exp.company?.value || '';
+    const roleVal = exp.role?.value || '';
+    const check = isValidWorkExperience(companyVal, roleVal, fullDocumentText);
+
+    if (!check.valid) {
+      rejectedItems.push({
+        value: `${roleVal} at ${companyVal}`.trim(),
+        reason: check.reason || 'Invalid work experience entity',
+        section: 'EXPERIENCE',
+      });
+      continue;
     }
 
-    supportedCount += 1;
-    if (item.confidence === 'high') highConfidenceCount += 1;
-    else if (item.confidence === 'medium') mediumConfidenceCount += 1;
-    else if (item.confidence === 'low') lowConfidenceCount += 1;
-    else if (item.confidence === 'inferred') inferredCount += 1;
+    const validatedBullets: EvidenceItem[] = [];
+    for (const bullet of exp.bullets || []) {
+      const bVal = bullet.value.trim();
+      if (bVal && isPhraseInSourceText(bVal, fullDocumentText)) {
+        validatedBullets.push({
+          ...bullet,
+          confidence: 'high',
+        });
+      }
+    }
 
-    return item;
-  };
-
-  // 1. Validate Identity
-  if (model.identity.name) {
-    const validated = validateItem(model.identity.name, 'identity.name');
-    if (validated) model.identity.name = validated;
-  } else {
-    issues.push({
-      type: 'missing_source',
-      severity: 'warning',
-      field: 'identity.name',
-      message: 'Candidate name was not explicitly identified in document header.',
+    validatedWorkExperience.push({
+      ...exp,
+      bullets: validatedBullets,
     });
   }
 
-  if (model.identity.role) {
-    const validated = validateItem(model.identity.role, 'identity.role');
-    if (validated) model.identity.role = validated;
+  // 3. Projects Validation (Semantic Project Titles & Anti-Fragmentation)
+  const validatedProjects: ProjectEvidence[] = [];
+
+  for (const proj of rawModel.projects || []) {
+    const nameVal = proj.name?.value || '';
+    const check = isValidProjectTitle(nameVal);
+
+    if (!check.valid) {
+      rejectedItems.push({
+        value: nameVal,
+        reason: check.reason || 'Invalid project title',
+        section: 'PROJECTS',
+      });
+      continue;
+    }
+
+    if (!isPhraseInSourceText(nameVal, fullDocumentText)) {
+      rejectedItems.push({
+        value: nameVal,
+        reason: 'Project title not found in resume source text',
+        section: 'PROJECTS',
+      });
+      continue;
+    }
+
+    // Validate technologies
+    const validatedTechs: EvidenceItem[] = [];
+    for (const tech of proj.technologies || []) {
+      const tVal = tech.value.trim();
+      if (tVal && isPhraseInSourceText(tVal, fullDocumentText)) {
+        validatedTechs.push({
+          ...tech,
+          confidence: 'high',
+        });
+      } else if (tVal) {
+        rejectedItems.push({
+          value: tVal,
+          reason: `Project technology "${tVal}" not found in resume`,
+          section: 'PROJECTS',
+        });
+      }
+    }
+
+    // Validate outcomes (metrics must exist in document)
+    const validatedOutcomes: EvidenceItem[] = [];
+    for (const outcome of proj.outcomes || []) {
+      const oVal = outcome.value.trim();
+      if (oVal && isPhraseInSourceText(oVal, fullDocumentText)) {
+        validatedOutcomes.push({
+          ...outcome,
+          confidence: 'high',
+        });
+      } else if (oVal) {
+        rejectedItems.push({
+          value: oVal,
+          reason: `Project outcome claim "${oVal}" not grounded in source text`,
+          section: 'PROJECTS',
+        });
+      }
+    }
+
+    validatedProjects.push({
+      ...proj,
+      name: {
+        ...proj.name,
+        confidence: 'high',
+      },
+      technologies: validatedTechs,
+      outcomes: validatedOutcomes,
+    });
   }
 
-  // 2. Validate Work Experience
-  model.workExperience = model.workExperience.map((exp, idx) => {
-    const compVal = validateItem(exp.company, `workExperience[${idx}].company`) || exp.company;
-    const roleVal = validateItem(exp.role, `workExperience[${idx}].role`) || exp.role;
-    const startVal = exp.startDate ? validateItem(exp.startDate, `workExperience[${idx}].startDate`) : undefined;
-    const endVal = exp.endDate ? validateItem(exp.endDate, `workExperience[${idx}].endDate`) : undefined;
+  // 4. Education Validation (Anti-Fragmentation)
+  const validatedEducation: EducationEvidence[] = [];
 
-    // Date consistency
-    const dateIssues = validateDateRange(startVal?.value, endVal?.value, `workExperience[${idx}].dates`);
-    issues.push(...dateIssues);
+  for (const edu of rawModel.education || []) {
+    const degVal = edu.degree?.value || '';
+    const instVal = edu.institution?.value || '';
+    const check = isValidEducationRecord(degVal, instVal);
 
-    // Validate bullets
-    const validBullets = (exp.bullets || [])
-      .map((b, bIdx) => validateItem(b, `workExperience[${idx}].bullets[${bIdx}]`))
-      .filter((b): b is EvidenceItem => Boolean(b));
+    if (!check.valid) {
+      rejectedItems.push({
+        value: `${degVal} ${instVal}`.trim(),
+        reason: check.reason || 'Invalid education record',
+        section: 'EDUCATION',
+      });
+      continue;
+    }
 
-    return {
-      company: compVal,
-      role: roleVal,
-      startDate: startVal,
-      endDate: endVal,
-      bullets: validBullets,
-    };
-  });
+    const isDegFound = degVal ? isPhraseInSourceText(degVal, fullDocumentText) : true;
+    const isInstFound = instVal ? isPhraseInSourceText(instVal, fullDocumentText) : true;
 
-  // 3. Validate Projects & Outcomes (Strip fabricated metrics)
-  model.projects = model.projects.map((proj, idx) => {
-    const nameVal = validateItem(proj.name, `projects[${idx}].name`) || proj.name;
-    const probVal = proj.problem ? validateItem(proj.problem, `projects[${idx}].problem`) : undefined;
-    const contribVal = proj.contribution ? validateItem(proj.contribution, `projects[${idx}].contribution`) : undefined;
+    if (!isDegFound && !isInstFound) {
+      rejectedItems.push({
+        value: `${degVal} at ${instVal}`.trim(),
+        reason: 'Education degree and institution not found in resume',
+        section: 'EDUCATION',
+      });
+      continue;
+    }
 
-    const validTech = (proj.technologies || [])
-      .map((t, tIdx) => validateItem(t, `projects[${idx}].technologies[${tIdx}]`))
-      .filter((t): t is EvidenceItem => Boolean(t));
+    validatedEducation.push({
+      ...edu,
+      degree: edu.degree ? { ...edu.degree, confidence: 'high' } : undefined,
+      institution: edu.institution ? { ...edu.institution, confidence: 'high' } : undefined,
+      year: edu.year ? { ...edu.year, confidence: 'high' } : undefined,
+    });
+  }
 
-    // Metric validation: If outcome has metric, verify metric is in sourceText
-    const validOutcomes = (proj.outcomes || [])
-      .map((o, oIdx) => {
-        const validated = validateItem(o, `projects[${idx}].outcomes[${oIdx}]`);
-        if (!validated) return undefined;
+  // 5. Skills Validation (Deduplication & Grounding)
+  const validateSkillList = (skills: EvidenceItem[], _category?: 'technical' | 'product' | 'domain'): EvidenceItem[] => {
+    const seen = new Set<string>();
+    const validList: EvidenceItem[] = [];
 
-        const metricMatch = validated.value.match(/\b(\d+%\s*|\d+x\s*|\$\d+[\w]*)\b/i);
-        if (metricMatch && !validated.sourceText.includes(metricMatch[1])) {
-          issues.push({
-            type: 'unsupported_value',
-            severity: 'warning',
-            field: `projects[${idx}].outcomes[${oIdx}]`,
-            message: `Metric outcome '${validated.value}' lacks numerical evidence in source text. Stripping outcome.`,
-          });
-          return undefined;
-        }
-        return validated;
-      })
-      .filter((o): o is EvidenceItem => Boolean(o));
+    for (const skill of skills || []) {
+      const sVal = (skill.value || '').trim();
+      if (!sVal) continue;
 
-    return {
-      name: nameVal,
-      problem: probVal,
-      contribution: contribVal,
-      technologies: validTech,
-      outcomes: validOutcomes,
-    };
-  });
+      const norm = sVal.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (seen.has(norm)) continue;
 
-  // 4. Validate & Deduplicate Skills
-  const deduplicatedTech = deduplicateSkills(
-    (model.skills.technical || [])
-      .map((s, idx) => validateItem(s, `skills.technical[${idx}]`))
-      .filter((s): s is EvidenceItem => Boolean(s))
-  );
+      if (isPhraseInSourceText(sVal, fullDocumentText)) {
+        seen.add(norm);
+        validList.push({
+          ...skill,
+          confidence: 'high',
+        });
+      } else {
+        rejectedItems.push({
+          value: sVal,
+          reason: `Skill "${sVal}" has no supporting source text in the resume`,
+          section: 'SKILLS',
+        });
+      }
+    }
 
-  const deduplicatedProd = deduplicateSkills(
-    (model.skills.product || [])
-      .map((s, idx) => validateItem(s, `skills.product[${idx}]`))
-      .filter((s): s is EvidenceItem => Boolean(s))
-  );
-
-  const deduplicatedDomain = deduplicateSkills(
-    (model.skills.domain || [])
-      .map((s, idx) => validateItem(s, `skills.domain[${idx}]`))
-      .filter((s): s is EvidenceItem => Boolean(s))
-  );
-
-  model.skills = {
-    technical: deduplicatedTech.deduplicated,
-    product: deduplicatedProd.deduplicated,
-    domain: deduplicatedDomain.deduplicated,
+    return validList;
   };
 
-  // 5. Validate Education
-  model.education = (model.education || []).map((edu, idx) => ({
-    degree: edu.degree ? validateItem(edu.degree, `education[${idx}].degree`) : undefined,
-    institution: edu.institution ? validateItem(edu.institution, `education[${idx}].institution`) : undefined,
-    year: edu.year ? validateItem(edu.year, `education[${idx}].year`) : undefined,
-  }));
+  const technical = validateSkillList(rawModel.skills?.technical || [], 'technical');
+  const product = validateSkillList(rawModel.skills?.product || [], 'product');
+  const domain = validateSkillList(rawModel.skills?.domain || [], 'domain');
 
-  // 6. Validate Certifications & Achievements
-  model.certifications = (model.certifications || [])
-    .map((c, idx) => validateItem(c, `certifications[${idx}]`))
-    .filter((c): c is EvidenceItem => Boolean(c));
+  // 6. Achievements Validation
+  const validatedAchievements: EvidenceItem[] = [];
+  for (const ach of rawModel.achievements || []) {
+    const aVal = (ach.value || '').trim();
+    if (aVal && isPhraseInSourceText(aVal, fullDocumentText)) {
+      validatedAchievements.push({
+        ...ach,
+        confidence: 'high',
+      });
+    }
+  }
 
-  model.achievements = (model.achievements || [])
-    .map((a, idx) => validateItem(a, `achievements[${idx}]`))
-    .filter((a): a is EvidenceItem => Boolean(a));
+  // 7. Certifications Validation
+  const validatedCertifications: EvidenceItem[] = [];
+  for (const cert of rawModel.certifications || []) {
+    const cVal = (cert.value || '').trim();
+    if (cVal && isPhraseInSourceText(cVal, fullDocumentText)) {
+      validatedCertifications.push({
+        ...cert,
+        confidence: 'high',
+      });
+    }
+  }
 
-  const errorCount = issues.filter((i) => i.severity === 'error').length;
+  const validatedModel: CandidateEvidenceModel = {
+    identity: validatedIdentity,
+    education: validatedEducation,
+    workExperience: validatedWorkExperience,
+    projects: validatedProjects,
+    skills: {
+      technical,
+      product,
+      domain,
+    },
+    certifications: validatedCertifications,
+    achievements: validatedAchievements,
+    unclear: rawModel.unclear || [],
+  };
 
   return {
-    isValid: errorCount === 0,
-    model,
-    issues,
-    repairedFields,
-    evidenceQualitySummary: {
-      totalItems,
-      supportedCount,
-      partiallySupportedCount,
-      unsupportedCount,
-      highConfidenceCount,
-      mediumConfidenceCount,
-      lowConfidenceCount,
-      inferredCount,
-    },
+    model: validatedModel,
+    unsupportedClaims: rejectedItems.map((r) => r.value),
+    confidenceAdjustments: [],
+    inferredCount: 0,
+    rejectedItems,
+    warnings,
   };
 }

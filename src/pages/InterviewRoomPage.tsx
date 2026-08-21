@@ -7,7 +7,7 @@ import { QuestionBlock } from '../components/interview/QuestionBlock';
 import { AnswerInput } from '../components/interview/AnswerInput';
 import { InterviewCompletionScreen } from '../components/interview/InterviewCompletionScreen';
 import { ExitConfirmModal } from '../components/interview/ExitConfirmModal';
-import { AlertTriangle, ShieldAlert, ArrowRight, Clock, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock, ShieldAlert } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 
 export const InterviewRoomPage: React.FC = () => {
@@ -29,7 +29,6 @@ export const InterviewRoomPage: React.FC = () => {
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
-  const [isRetryingReport, setIsRetryingReport] = useState(false);
 
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const isCompletingRef = useRef(false);
@@ -172,7 +171,6 @@ export const InterviewRoomPage: React.FC = () => {
   };
 
   const handleRetryReport = async () => {
-    setIsRetryingReport(true);
     try {
       const rep = await getReport(targetSessionId);
       if (rep) {
@@ -180,8 +178,6 @@ export const InterviewRoomPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Error retrying report generation:', err);
-    } finally {
-      setIsRetryingReport(false);
     }
   };
 

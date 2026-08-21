@@ -231,8 +231,10 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
           resolve();
         };
 
-        utterance.onerror = (e) => {
-          console.warn('Speech synthesis playback ended with event:', e);
+        utterance.onerror = (e: any) => {
+          if (e.error !== 'canceled' && e.error !== 'interrupted') {
+            console.warn('Speech synthesis playback event:', e.error || e);
+          }
           this.isAISpeaking = false;
           this.listeners?.onSpeechEnd('ai');
           if (this.status === 'speaking') {

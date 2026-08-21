@@ -5,7 +5,6 @@ import { CompanyResearchData } from '../../types/companyResearch';
 import { MatchAnalysisResult } from '../../types/matchAnalysis';
 import { Question, QuestionFeedback, FinalReport, InterviewObjective } from '../../types/interview';
 import { callClientGeminiStructured, callClientGeminiText } from '../ai/clientGemini';
-import { calculateReadinessPercentage } from '../ai/scoringRubric';
 import { resumeService } from './resumeService';
 
 
@@ -44,6 +43,8 @@ export const aiService = {
     evidenceModel: CandidateEvidenceModel;
     classification: DocumentClassification;
     validationResult?: import('../../types/resume').ValidationResult;
+    extractedDoc?: import('../../types/resume').ExtractedDocument;
+    rawGeminiOutput?: any;
   }> {
     const key = apiKey || getClientApiKey();
 
@@ -64,24 +65,21 @@ export const aiService = {
       console.groupEnd();
     }
 
-    // Step 2: Classification Gate
-    const classification: DocumentClassification = {
-      documentType: extractedDoc.documentType,
-      documentQuality: extractedDoc.documentQuality,
-      extractedTextLength: extractedDoc.characterCount,
-      sectionsDetected: extractedDoc.sections.map((s) => s.normalizedName),
-      canProceed: extractedDoc.documentQuality !== 'unreadable' && !['academic_document', 'certificate'].includes(extractedDoc.documentType),
-    };
-
-    if (!classification.canProceed) {
+    // Step 2: Classification Gate (for academic transcripts or course certificates)
+    if (['academic_document', 'certificate'].includes(extractedDoc.documentType)) {
       const reason = extractedDoc.documentType === 'academic_document'
         ? "We couldn't identify this document as a resume or CV. It appears to be an academic marks sheet or grade transcript. Please upload your resume or CV."
-        : extractedDoc.documentType === 'certificate'
-        ? "This document appears to be an individual course or completion certificate, not a full candidate resume. Please upload your complete resume."
-        : "We couldn't extract enough text from this document. It may be a scanned image or corrupted PDF. Please upload a searchable text PDF or DOCX resume.";
+        : "This document appears to be an individual course or completion certificate, not a full candidate resume. Please upload your complete resume.";
 
       throw Object.assign(new Error(reason), {
-        classification: { ...classification, rejectionReason: reason },
+        classification: {
+          documentType: extractedDoc.documentType,
+          documentQuality: extractedDoc.documentQuality,
+          extractedTextLength: extractedDoc.characterCount,
+          sectionsDetected: extractedDoc.sections.map((s) => s.normalizedName),
+          rejectionReason: reason,
+          canProceed: false,
+        },
         code: 'DOCUMENT_REJECTED',
       });
     }
@@ -102,6 +100,21 @@ export const aiService = {
         extractedDoc
       );
     } catch (clientErr) {
+      if (extractedDoc.characterCount < 80) {
+        const reason = "We couldn't extract enough text from this document. It may be a scanned image or corrupted PDF. Please upload a searchable text PDF or DOCX resume.";
+        throw Object.assign(new Error(reason), {
+          classification: {
+            documentType: 'unknown',
+            documentQuality: 'unreadable',
+            extractedTextLength: extractedDoc.characterCount,
+            sectionsDetected: [],
+            rejectionReason: reason,
+            canProceed: false,
+          },
+          code: 'DOCUMENT_REJECTED',
+        });
+      }
+
       console.info('[aiService] Synthesizing resume evidence via deterministic fallback engine.');
       const { parseResumeEvidenceDeterministically } = await import('../ai/resumeTextParser');
       const { validateCandidateEvidenceModel } = await import('../ai/evidenceValidator');
@@ -111,14 +124,21 @@ export const aiService = {
 
       return {
         evidenceModel: validationResult.model,
-        classification,
+        classification: {
+          documentType: extractedDoc.documentType,
+          documentQuality: extractedDoc.documentQuality,
+          extractedTextLength: extractedDoc.characterCount,
+          sectionsDetected: extractedDoc.sections.map((s) => s.normalizedName),
+          canProceed: true,
+        },
         validationResult,
+        extractedDoc,
       };
     }
   },
 
   /**
-   * Client-side Gemini evidence extraction with strict anti-hallucination prompt
+   * Client-side Gemini evidence extraction with block-scoped structural prompting
    * and post-extraction deterministic evidence validation.
    */
   async extractResumeEvidenceClient(
@@ -132,26 +152,41 @@ export const aiService = {
     evidenceModel: CandidateEvidenceModel;
     classification: DocumentClassification;
     validationResult: import('../../types/resume').ValidationResult;
+    extractedDoc?: import('../../types/resume').ExtractedDocument;
+    rawGeminiOutput?: any;
   }> {
     const { validateCandidateEvidenceModel } = await import('../ai/evidenceValidator');
+
+    // Build block-structured document representation to preserve project and education boundaries
+    const structuredBlocksText = (extractedDoc?.sections && extractedDoc.sections.length > 0)
+      ? (extractedDoc.sections || []).map((sec) => {
+          if (sec.normalizedName === 'projects' && extractedDoc?.detectedProjects && extractedDoc.detectedProjects.length > 0) {
+            return `[SECTION: PROJECTS]\n${extractedDoc.detectedProjects.map((p, idx) => `[PROJECT_BLOCK_${idx + 1}]\nHeading: ${p.heading}\nContent:\n${p.lines.join('\n')}\n[/PROJECT_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: PROJECTS]`;
+          }
+          if (sec.normalizedName === 'education' && extractedDoc?.detectedEducation && extractedDoc.detectedEducation.length > 0) {
+            return `[SECTION: EDUCATION]\n${extractedDoc.detectedEducation.map((e, idx) => `[EDUCATION_BLOCK_${idx + 1}]\nDegree: ${e.degree || ''}\nInstitution: ${e.institution || ''}\nYear: ${e.year || ''}\nGrade: ${e.grade || ''}\nRaw Text: ${e.lines.join(' | ')}\n[/EDUCATION_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: EDUCATION]`;
+          }
+          return `[SECTION: ${sec.normalizedName.toUpperCase()}]\n${sec.text}\n[/SECTION: ${sec.normalizedName.toUpperCase()}]`;
+        }).join('\n\n')
+      : normalizedText;
 
     try {
       const prompt = `
 You are a resume evidence extraction engine.
-Extract only information explicitly supported by the supplied document text.
+Extract only information explicitly supported by the supplied document text and structural blocks.
 
-CRITICAL EXTRACTION RULES:
-1. Never invent.
-2. Never complete missing information.
-3. Never infer a skill merely because another technology suggests it.
-4. Never invent metrics or outcomes (e.g. if a project has no metric, leave "outcomes": []).
-5. Never invent employers, job titles, or dates.
-6. Never upgrade uncertain information into factual information.
-7. Every single extracted item requires exact supporting "sourceText" from the resume.
-8. Set confidence:
-   - "high"     = exact phrase found in resume
-   - "medium"   = source found but required interpretation
-   - "inferred" = implied by context (will require candidate confirmation)
+CRITICAL STRUCTURAL EXTRACTION CONSTRAINTS:
+1. For each [PROJECT_BLOCK_X] in [SECTION: PROJECTS], output EXACTLY ONE object in the "projects" array.
+   - Set "name" to the project Heading.
+   - Place description and bullet sentences inside "problem", "contribution", "technologies", or "outcomes".
+   - NEVER create a separate project object for a bullet line or sentence fragment.
+2. For each [EDUCATION_BLOCK_X] in [SECTION: EDUCATION], output EXACTLY ONE object in the "education" array.
+   - Combine degree, institution, year, and grade from that block into the single education object.
+   - NEVER create separate education objects for CGPA, institution, or degree fragments.
+3. For "workExperience", output ONLY if there is an explicit [SECTION: EXPERIENCE] containing real employer organizations. If empty or absent, return "workExperience": [].
+4. For "skills", output ONLY skills with explicit source text from the resume.
+5. Never invent or complete missing information.
+6. Every single extracted item requires exact supporting "sourceText" from the resume.
 
 Return ONLY valid JSON matching this schema:
 {
@@ -208,8 +243,8 @@ Return ONLY valid JSON matching this schema:
   ]
 }
 
-RESUME DOCUMENT TEXT:
-${normalizedText}
+RESUME DOCUMENT BLOCKS:
+${structuredBlocksText}
 `;
 
       const geminiConfig: import('../ai/clientGemini').ClientGeminiConfig = { apiKey };
@@ -222,23 +257,52 @@ ${normalizedText}
 
       const rawEvidenceModel = await callClientGeminiStructured<CandidateEvidenceModel>(
         prompt,
-        'You are a strict resume evidence extraction engine. Only extract information explicitly supported by sourceText.',
+        'You are a strict resume evidence extraction engine. Only extract information explicitly supported by sourceText and structural blocks.',
         geminiConfig
       );
 
       if (rawEvidenceModel) {
-        const validationResult = validateCandidateEvidenceModel(rawEvidenceModel, normalizedText);
+        let validationText = normalizedText;
+        if (validationText.length < 80) {
+          const pieces: string[] = [];
+          if (rawEvidenceModel.identity?.name?.value) pieces.push(rawEvidenceModel.identity.name.value);
+          if (rawEvidenceModel.identity?.email?.value) pieces.push(rawEvidenceModel.identity.email.value);
+          for (const edu of rawEvidenceModel.education || []) {
+            if (edu.degree?.value) pieces.push(edu.degree.value);
+            if (edu.institution?.value) pieces.push(edu.institution.value);
+          }
+          for (const exp of rawEvidenceModel.workExperience || []) {
+            if (exp.company?.value) pieces.push(exp.company.value);
+            if (exp.role?.value) pieces.push(exp.role.value);
+            for (const b of exp.bullets || []) pieces.push(b.value);
+          }
+          for (const proj of rawEvidenceModel.projects || []) {
+            if (proj.name?.value) pieces.push(proj.name.value);
+            if (proj.problem?.value) pieces.push(proj.problem.value);
+            if (proj.contribution?.value) pieces.push(proj.contribution.value);
+          }
+          for (const s of [...(rawEvidenceModel.skills?.technical || []), ...(rawEvidenceModel.skills?.product || []), ...(rawEvidenceModel.skills?.domain || [])]) {
+            if (s.value) pieces.push(s.value);
+          }
+          for (const a of rawEvidenceModel.achievements || []) pieces.push(a.value);
+          for (const c of rawEvidenceModel.certifications || []) pieces.push(c.value);
+          validationText = pieces.join('\n');
+        }
+
+        const validationResult = validateCandidateEvidenceModel(rawEvidenceModel, validationText);
 
         return {
           evidenceModel: validationResult.model,
           classification: {
             documentType: extractedDoc?.documentType || 'resume',
             documentQuality: extractedDoc?.documentQuality || 'good',
-            extractedTextLength: normalizedText.length,
+            extractedTextLength: validationText.length,
             sectionsDetected: extractedDoc?.sections.map((s) => s.normalizedName) || [],
             canProceed: true,
           },
           validationResult,
+          extractedDoc,
+          rawGeminiOutput: rawEvidenceModel,
         };
       }
     } catch (clientErr) {
@@ -260,6 +324,8 @@ ${normalizedText}
         canProceed: true,
       },
       validationResult,
+      extractedDoc,
+      rawGeminiOutput: fallbackEvidence,
     };
   },
 

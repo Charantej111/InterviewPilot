@@ -32,6 +32,10 @@ export class TTSService {
     this.cachedVoices = window.speechSynthesis.getVoices();
   }
 
+  public getCurrentUtterance(): SpeechSynthesisUtterance | null {
+    return this.currentUtterance;
+  }
+
   public getAvailableVoices(): SpeechSynthesisVoice[] {
     if (this.cachedVoices.length === 0 && typeof window !== 'undefined' && 'speechSynthesis' in window) {
       this.cachedVoices = window.speechSynthesis.getVoices();

@@ -8,16 +8,6 @@ export interface DeterministicEvaluationInput {
   difficulty?: string;
 }
 
-import { Question, QuestionFeedback } from '../../types/interview';
-
-export interface DeterministicEvaluationInput {
-  question: Question;
-  answerText: string;
-  role: string;
-  company: string;
-  difficulty?: string;
-}
-
 export function evaluateAnswerDeterministically(
   input: DeterministicEvaluationInput
 ): QuestionFeedback & { followUpNeeded: boolean; followUpTriggerReason?: string } {

@@ -17,6 +17,7 @@ export interface EvidenceItem {
     section: string;        // e.g. 'EXPERIENCE' | 'PROJECTS' | 'SKILLS' | 'EDUCATION' | 'HEADER' | 'ACHIEVEMENTS'
     approximateLine?: number;
   };
+  parentBlockId?: string;
   confidence: EvidenceConfidence;
 }
 
@@ -39,10 +40,50 @@ export interface ExtractedSection {
   endOffset: number;
 }
 
+export interface LineBlock {
+  lineNumber: number;
+  lineIndex: number;
+  pageNumber?: number;
+  columnIndex?: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  tokens: string[];
+  section?: string;
+}
+
+export interface ExtractedProjectBlock {
+  id: string;
+  heading: string;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  blockText: string;
+  name?: string;
+  text?: string;
+}
+
+export interface ExtractedEducationBlock {
+  id: string;
+  degree?: string;
+  institution?: string;
+  year?: string;
+  grade?: string;
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  blockText: string;
+}
+
 export interface ExtractedDocument {
   rawText: string;
   normalizedText: string;
   sections: ExtractedSection[];
+  lineBlocks?: LineBlock[];
+  detectedProjects?: ExtractedProjectBlock[];
+  detectedEducation?: ExtractedEducationBlock[];
   pageCount?: number;
   characterCount: number;
   documentType: DocumentType;
@@ -94,6 +135,12 @@ export interface ProjectEvidence {
   outcomes: EvidenceItem[];      // metrics, results — often missing → []
 }
 
+export interface EducationEvidence {
+  degree?: EvidenceItem;
+  institution?: EvidenceItem;
+  year?: EvidenceItem;
+}
+
 export interface CandidateEvidenceModel {
   identity: {
     name?: EvidenceItem;
@@ -101,11 +148,7 @@ export interface CandidateEvidenceModel {
     phone?: EvidenceItem;
     role?: EvidenceItem;         // current/target role if explicitly stated
   };
-  education: {
-    degree?: EvidenceItem;
-    institution?: EvidenceItem;
-    year?: EvidenceItem;
-  }[];
+  education: EducationEvidence[];
   workExperience: WorkExperienceEvidence[];
   projects: ProjectEvidence[];
   skills: {
@@ -141,11 +184,16 @@ export interface ValidationIssue {
 }
 
 export interface ValidationResult {
-  isValid: boolean;
+  isValid?: boolean;
   model: CandidateEvidenceModel;
-  issues: ValidationIssue[];
-  repairedFields: string[];
-  evidenceQualitySummary: {
+  issues?: ValidationIssue[];
+  repairedFields?: string[];
+  rejectedItems?: { field?: string; value: string; reason: string; section?: string }[];
+  unsupportedClaims?: string[];
+  confidenceAdjustments?: any[];
+  inferredCount?: number;
+  warnings?: string[];
+  evidenceQualitySummary?: {
     totalItems: number;
     supportedCount: number;
     partiallySupportedCount: number;

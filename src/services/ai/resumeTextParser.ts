@@ -5,22 +5,27 @@ import {
   WorkExperienceEvidence,
   ProjectEvidence,
 } from '../../types/resume';
+import {
+  detectSections,
+  detectProjectBoundaries,
+  detectEducationBoundaries,
+} from './documentExtractor';
 
+// Common Technical & Domain Skills Dictionary for grounded extraction
 const COMMON_SKILLS_DICTIONARY = [
   // Languages
-  'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'golang', 'rust', 'html', 'css', 'sql', 'bash', 'shell',
+  'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'golang', 'rust', 'html', 'css', 'sql', 'bash', 'shell', 'r',
   // Frameworks & Backend
-  'fastapi', 'flask', 'django', 'express', 'node.js', 'react', 'next.js', 'spring boot', 'graphql', 'rest api', 'tailwind',
-  // AI, LLMs & Agents
-  'langchain', 'langgraph', 'transformers', 'hugging face', 'faiss', 'rag', 'llm agents', 'llms', 'genai',
-  'openai', 'groq', 'gemini', 'nvidia', 'huggingface', 'pytorch', 'tensorflow', 'deep learning', 'machine learning',
-  'nlp', 'computer vision', 'pymupdf', 'scikit-learn',
+  'fastapi', 'flask', 'django', 'express', 'node.js', 'react', 'next.js', 'vue', 'angular', 'spring boot', 'graphql', 'rest api', 'tailwind',
+  // AI, ML & Data
+  'scikit-learn', 'pandas', 'numpy', 'scipy', 'matplotlib', 'seaborn', 'tensorflow', 'pytorch', 'keras',
+  'machine learning', 'deep learning', 'nlp', 'computer vision', 'data science', 'random forest', 'xgboost', 'linear regression',
+  'langchain', 'langgraph', 'transformers', 'hugging face', 'faiss', 'rag', 'llms', 'genai', 'openai', 'gemini',
   // Cloud, DevOps & Databases
   'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'git', 'github', 'ci/cd', 'linux', 'nginx', 'postgresql',
-  'mysql', 'mongodb', 'redis', 'supabase',
-  // Data Science & Tools
-  'pandas', 'numpy', 'matplotlib', 'excel', 'power bi', 'tableau', 'spark', 'statistics', 'figma', 'ui/ux',
-  'agile', 'scrum', 'jira', 'system design', 'wordpress'
+  'mysql', 'sqlite', 'mongodb', 'redis', 'supabase',
+  // Tools & Methods
+  'excel', 'power bi', 'tableau', 'spark', 'hadoop', 'jupyter', 'figma', 'jira', 'agile', 'scrum', 'system design'
 ];
 
 /**
@@ -34,17 +39,18 @@ export function normalizeResumeText(rawText: string): string {
     .replace(/\r\n|\r/g, '\n')
     .replace(/[ \t]+/g, ' ');
 
-  // Standardize bullets to newlines
-  text = text.replace(/([•\u2022\u25cf\u25cb\u25aa]|\s\*\s)/g, '\n• ');
+  // Standardize bullet points to newlines with bullet character
+  text = text.replace(/([•\u2022\u25cf\u25cb\u25aa\u25a0]|\n\s*[*]\s+|\n\s*-\s+)/g, '\n• ');
 
-  // Insert section marker tags
+  // Insert section marker tags strictly on line boundaries
   const sectionKeywords = [
-    { pattern: /\b(PROFILE\s*SUMMARY|PROFESSIONAL\s*SUMMARY|ABOUT\s*ME|OBJECTIVE)\b/gi, tag: 'SUMMARY' },
-    { pattern: /\b(TECHNICAL\s*SKILLS|CORE\s*COMPETENCIES|SKILLS\s*&?\s*COMPETENCIES|SKILLS)\b/gi, tag: 'SKILLS' },
-    { pattern: /\b(KEY\s*PROJECTS|PROJECTS\s*&?\s*INITIATIVES|PROJECTS|ACADEMIC\s*PROJECTS)\b/gi, tag: 'PROJECTS' },
-    { pattern: /\b(WORK\s*EXPERIENCE|PROFESSIONAL\s*EXPERIENCE|EXPERIENCE|EMPLOYMENT|INTERNSHIPS?)\b/gi, tag: 'EXPERIENCE' },
-    { pattern: /\b(ACHIEVEMENTS\s*\/?\s*CERTIFICATIONS|ACHIEVEMENTS|CERTIFICATIONS|AWARDS|HONORS)\b/gi, tag: 'ACHIEVEMENTS' },
-    { pattern: /\b(EDUCATION|ACADEMIC\s*BACKGROUND|QUALIFICATIONS)\b/gi, tag: 'EDUCATION' },
+    { pattern: /^[ \t]*(PROFILE\s*SUMMARY|PROFESSIONAL\s*SUMMARY|ABOUT\s*ME|CAREER\s*OBJECTIVE|OBJECTIVE)[ \t]*$/gim, tag: 'SUMMARY' },
+    { pattern: /^[ \t]*(TECHNICAL\s*SKILLS|CORE\s*COMPETENCIES|SKILLS\s*&?\s*COMPETENCIES|SKILLS\s*&?\s*ABILITIES|AREAS\s*OF\s*EXPERTISE|SKILLS)[ \t]*$/gim, tag: 'SKILLS' },
+    { pattern: /^[ \t]*(KEY\s*PROJECTS|PROJECTS\s*&?\s*INITIATIVES|ACADEMIC\s*PROJECTS|PERSONAL\s*PROJECTS|SELECTED\s*PROJECTS|PROJECTS)[ \t]*$/gim, tag: 'PROJECTS' },
+    { pattern: /^[ \t]*(WORK\s*EXPERIENCE|PROFESSIONAL\s*EXPERIENCE|EMPLOYMENT\s*HISTORY|WORK\s*HISTORY|EMPLOYMENT|EXPERIENCE|INTERNSHIPS?)[ \t]*$/gim, tag: 'EXPERIENCE' },
+    { pattern: /^[ \t]*(CERTIFICATIONS|CERTIFICATES|LICENSES\s*&?\s*CERTIFICATIONS)[ \t]*$/gim, tag: 'CERTIFICATIONS' },
+    { pattern: /^[ \t]*(ACHIEVEMENTS\s*\/?\s*AWARDS|HONORS?\s*&?\s*AWARDS|KEY\s*ACHIEVEMENTS|ACHIEVEMENTS|AWARDS|HONORS|ACCOMPLISHMENTS)[ \t]*$/gim, tag: 'ACHIEVEMENTS' },
+    { pattern: /^[ \t]*(EDUCATION|ACADEMIC\s*BACKGROUND|ACADEMIC\s*QUALIFICATIONS|QUALIFICATIONS)[ \t]*$/gim, tag: 'EDUCATION' },
   ];
 
   for (const { pattern, tag } of sectionKeywords) {
@@ -55,7 +61,7 @@ export function normalizeResumeText(rawText: string): string {
 }
 
 /**
- * Extracts candidate name, email, phone, and links from the header block
+ * Extracts candidate name, email, phone, and role from the header block
  */
 export function extractCandidateIdentity(cleanText: string, fileName?: string): {
   name: string;
@@ -80,9 +86,8 @@ export function extractCandidateIdentity(cleanText: string, fileName?: string): 
 
   if (email && headerBlock.includes(email)) {
     const beforeEmail = headerBlock.slice(0, headerBlock.indexOf(email)).trim();
-    // Match 2-4 uppercase words
     const nameMatch = beforeEmail.match(/([A-Za-z]{2,20}(?:\s+[A-Za-z]{2,20}){1,3})/);
-    if (nameMatch && !/resume|cv|profile|summary|section|header|page|problem/i.test(nameMatch[1])) {
+    if (nameMatch && !/resume|cv|profile|summary|section|header|page|problem|phone|contact|linkedin|github/i.test(nameMatch[1])) {
       name = nameMatch[1];
     }
   }
@@ -96,7 +101,7 @@ export function extractCandidateIdentity(cleanText: string, fileName?: string): 
         !line.includes('@') &&
         !line.includes('http') &&
         !line.includes('|') &&
-        !/resume|cv|profile|summary|section|header|page|problem|contact/i.test(line) &&
+        !/resume|cv|profile|summary|section|header|page|problem|contact|linkedin|github/i.test(line) &&
         !/\d{4}/.test(line)
       ) {
         const words = line.split(/\s+/).filter(Boolean);
@@ -124,192 +129,144 @@ export function extractCandidateIdentity(cleanText: string, fileName?: string): 
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
       .join(' ');
   } else {
-    name = 'Candidate';
+    name = '';
   }
 
   return { name, email, phone };
 }
 
 /**
- * Deterministically parses resume into structured CandidateProfile
+ * Deterministically parses resume text into structured CandidateProfile
  */
 export function parseResumeTextDeterministically(
   fileName: string,
   rawText: string
 ): CandidateProfile {
   const structured = normalizeResumeText(rawText);
-  const { name, email, phone } = extractCandidateIdentity(structured, fileName);
+  const { name } = extractCandidateIdentity(structured, fileName);
 
-  // Slices by section marker ===SECTION: [NAME]===
-  const sections: Record<string, string> = {};
-  const sectionSplits = structured.split(/===SECTION:\s*([A-Z]+)===\n/g);
-  for (let i = 1; i < sectionSplits.length; i += 2) {
-    const sName = sectionSplits[i];
-    const sContent = sectionSplits[i + 1] || '';
-    sections[sName] = sContent.trim();
-  }
+  const sections = detectSections(rawText);
+  const sectionsMap = new Map(sections.map((s) => [s.normalizedName, s.text]));
 
-  // 1. Parse Summary / Target Role
-  const summaryContent = sections['SUMMARY'] || '';
-  let summary = summaryContent.split('\n')[0]?.replace(/^•\s*/, '').trim() || '';
-  if (!summary) {
-    summary = `${name}'s professional background specializing in software engineering and modern technology stacks.`;
-  }
+  // 1. Parse Summary
+  const summary = sectionsMap.get('summary') || '';
 
-  // 2. Parse Technical Skills
-  const skillsContent = sections['SKILLS'] || structured;
-  const parsedSkillsList: string[] = [];
+  // 2. Parse Skills grounded strictly in the source text
+  const skillsContent = sectionsMap.get('skills') || structured;
+  const skillsSet = new Set<string>();
 
-  // If skills content has groups like "Languages: Python • Backend: FastAPI..."
-  const groupMatches = skillsContent.match(/(?:Languages|Backend\s*&?\s*APIs|AI\s*\/?\s*ML|DevOps|Tools|Frameworks|Databases|Cloud):\s*([^•\n]+)/gi);
-  if (groupMatches) {
-    for (const g of groupMatches) {
-      const items = g.replace(/^[^:]+:\s*/, '').split(/[,|•]/).map((s) => s.trim()).filter((s) => s.length > 1);
-      parsedSkillsList.push(...items);
-    }
-  }
-
-  // Match against standard dictionary for any missed items
   for (const skill of COMMON_SKILLS_DICTIONARY) {
-    const regex = new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (regex.test(structured)) {
-      const formatted = skill
+    const pattern = new RegExp(`\\b${skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (pattern.test(skillsContent)) {
+      const canonical = skill
         .split(' ')
-        .map((w) => (w.length <= 3 && !['fea', 'cfd', 'cam', 'cad', 'cnc', 'hvac', 'sql', 'aws', 'gcp', 'git'].includes(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+        .map((w) => (w.length <= 3 && !['sql', 'r', 'aws', 'gcp', 'git'].includes(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
         .join(' ');
-      parsedSkillsList.push(formatted);
-    }
-  }
-  const skills = Array.from(new Set(parsedSkillsList));
-
-  // 3. Parse Projects
-  const projectsContent = sections['PROJECTS'] || '';
-  const projects: { name: string; description: string; technologies: string[]; metrics: string }[] = [];
-
-  if (projectsContent) {
-    // Each project starts with a title line (often with | or date) followed by bullets
-    const projectBlocks = projectsContent.split(/\n(?=[A-Z0-9][A-Za-z0-9\s-]{2,40}\s*\|\s*[A-Za-z0-9\s-]+|[A-Z0-9][A-Za-z0-9\s-]{3,35}\s+(?:20\d\d|Apr'|May'|Jun'|Jul'|Aug'|Sep'|Oct'|Nov'|Dec'|Jan'|Feb'|Mar'))/g).filter((b) => b.trim().length > 15);
-
-    for (const block of projectBlocks) {
-      const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-      const titleLine = lines[0] || 'Project';
-      const bulletLines = lines.slice(1).map((b) => b.replace(/^•\s*/, '').trim()).filter((b) => b.length > 5);
-
-      const titleParts = titleLine.split('|');
-      let projTitle = titleLine;
-      if (titleParts.length >= 2) {
-        projTitle = `${titleParts[1].trim()} – ${titleParts[0].trim()}`;
-      }
-
-      const desc = bulletLines.join(' ') || titleLine;
-      const projTech = skills.filter((s) => block.toLowerCase().includes(s.toLowerCase())).slice(0, 6);
-      const metricMatch = block.match(/\b(\d+%\s*|\d+x\s*|\$\d+[\w]*|top\s*\d+)\b/i);
-
-      projects.push({
-        name: projTitle.slice(0, 65),
-        description: desc,
-        technologies: projTech.length > 0 ? projTech : ['Python', 'FastAPI', 'AI/ML'],
-        metrics: metricMatch ? metricMatch[0] : '',
-      });
+      skillsSet.add(canonical);
     }
   }
 
-  // 4. Parse Work Experience
-  const expContent = sections['EXPERIENCE'] || '';
+  const skills = Array.from(skillsSet);
+
+  // 3. Parse Projects via Generalized Project Boundary Detector
+  const projContent = sectionsMap.get('projects') || '';
+  const detectedProjectBlocks = detectProjectBoundaries(projContent);
+  const projects = detectedProjectBlocks.map((block) => {
+    const description = block.lines.join(' ').trim();
+    const matchedTechs = COMMON_SKILLS_DICTIONARY.filter((s) =>
+      new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(description)
+    );
+
+    const metricMatch = description.match(/\b(?:\d+(?:\.\d+)?%|\d+x|\$\d+|\d+\+?\s*(?:users|requests|accuracy|precision|rmse|latency))\b/i);
+
+    return {
+      name: block.heading,
+      description,
+      technologies: matchedTechs,
+      metrics: metricMatch ? metricMatch[0] : undefined,
+    };
+  });
+
+  // 4. Parse Work Experience (only if EXPERIENCE section is present with real employers)
+  const expContent = sectionsMap.get('experience') || '';
   const experience: { role: string; company: string; duration: string; highlights: string[] }[] = [];
 
   if (expContent) {
-    const expBlocks = expContent.split(/\n(?=[A-Z][A-Za-z0-9\s()-]{2,45}\s*\|\s*[A-Za-z0-9\s()-]+|[A-Z][A-Za-z0-9\s()-]{3,40}\s+(?:Jan'|Feb'|Mar'|Apr'|May'|Jun'|Jul'|Aug'|Sep'|Oct'|Nov'|Dec'|20\d\d))/g).filter((b) => b.trim().length > 15);
+    const lines = expContent.split('\n').map((l) => l.trim()).filter(Boolean);
+    let currentExp: { header: string; bullets: string[] } | null = null;
 
-    for (const block of expBlocks) {
-      const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-      const headerLine = lines[0] || 'Role';
-      const bulletLines = lines.slice(1).map((b) => b.replace(/^•\s*/, '').trim()).filter((b) => b.length > 5);
+    for (const line of lines) {
+      const isBullet = line.startsWith('•') || line.startsWith('*') || line.startsWith('-');
+      const isHeaderCandidate = !isBullet && line.length < 80;
 
-      let role = headerLine;
-      let company = 'Organization';
-      let duration = 'Recent';
-
-      if (headerLine.includes('|')) {
-        const parts = headerLine.split('|');
-        role = parts[0].trim();
-        const rightPart = parts[1].trim();
-
-        const dateMatch = rightPart.match(/(Jan'|Feb'|Mar'|Apr'|May'|Jun'|Jul'|Aug'|Sep'|Oct'|Nov'|Dec'|20\d\d)[^•\n]*/i);
-        if (dateMatch) {
-          company = rightPart.slice(0, dateMatch.index).trim() || rightPart;
-          duration = dateMatch[0].trim();
-        } else {
-          company = rightPart;
+      if (isHeaderCandidate && (!currentExp || currentExp.bullets.length > 0)) {
+        if (currentExp) {
+          const parts = currentExp.header.split('|');
+          const role = parts[0]?.trim() || currentExp.header;
+          const company = parts[1]?.trim() || '';
+          if (company || role.length > 3) {
+            experience.push({
+              role,
+              company,
+              duration: '',
+              highlights: currentExp.bullets,
+            });
+          }
         }
-      } else {
-        const dateMatch = headerLine.match(/(Jan'|Feb'|Mar'|Apr'|May'|Jun'|Jul'|Aug'|Sep'|Oct'|Nov'|Dec'|20\d\d)[^•\n]*/i);
-        if (dateMatch) {
-          role = headerLine.slice(0, dateMatch.index).trim();
-          duration = dateMatch[0].trim();
-        }
-      }
-
-      experience.push({
-        role: role.slice(0, 60),
-        company: company.slice(0, 60),
-        duration: duration.slice(0, 35),
-        highlights: bulletLines.length > 0 ? bulletLines : [headerLine],
-      });
-    }
-  }
-
-  // 5. Parse Education
-  const eduContent = sections['EDUCATION'] || '';
-  const education: { degree: string; institution: string; year: string }[] = [];
-
-  if (eduContent) {
-    const eduLines = eduContent.split('\n').map((l) => l.trim()).filter(Boolean);
-    let institution = '';
-    let degree = '';
-    let year = '2022 – Present';
-
-    for (const eline of eduLines) {
-      const cleanLine = eline.replace(/^•\s*/, '').trim();
-      const yearMatch = cleanLine.match(/\b(20\d\d\s*[-–]\s*(?:Present|20\d\d)|\d{4})\b/i);
-      if (yearMatch) {
-        year = yearMatch[0];
-      }
-
-      if (/university|college|institute|school|academy/i.test(cleanLine)) {
-        institution = cleanLine.split(/\b20\d\d/)[0].replace(/[-–|]/g, '').trim();
-      }
-      if (/bachelor|degree|b\.tech|b\.e|master|m\.tech|phd|diploma|computer\s*science|artificial\s*intelligence/i.test(cleanLine)) {
-        degree = cleanLine;
+        currentExp = { header: line, bullets: [] };
+      } else if (currentExp) {
+        currentExp.bullets.push(line.replace(/^•\s*/, ''));
       }
     }
 
-    if (!degree && eduLines.length > 0) degree = eduLines[0].replace(/^•\s*/, '');
-    if (!institution) institution = 'Aditya University, Andhra Pradesh';
-
-    education.push({
-      degree: degree || 'Bachelor\'s Degree in Artificial Intelligence and Machine Learning | CGPA – 7.75',
-      institution,
-      year,
-    });
+    if (currentExp) {
+      const parts = currentExp.header.split('|');
+      const role = parts[0]?.trim() || currentExp.header;
+      const company = parts[1]?.trim() || '';
+      if (company || role.length > 3) {
+        experience.push({
+          role,
+          company,
+          duration: '',
+          highlights: currentExp.bullets,
+        });
+      }
+    }
   }
 
-  // 6. Parse Achievements / Certifications
-  const achContent = sections['ACHIEVEMENTS'] || '';
+  // 5. Parse Education via Generalized Education Boundary Detector
+  const eduContent = sectionsMap.get('education') || '';
+  const detectedEduBlocks = detectEducationBoundaries(eduContent);
+  const education = detectedEduBlocks.map((block) => ({
+    degree: block.degree || 'Degree',
+    institution: block.institution || '',
+    year: block.year || '',
+  }));
+
+  // 6. Parse Achievements
+  const achContent = sectionsMap.get('achievements') || '';
   const achievements: string[] = [];
   if (achContent) {
     const achLines = achContent.split('\n').map((l) => l.replace(/^•\s*/, '').trim()).filter((l) => l.length > 5);
     achievements.push(...achLines);
   }
 
+  // 7. Parse Certifications
+  const certContent = sectionsMap.get('certifications') || '';
+  const certifications: string[] = [];
+  if (certContent) {
+    const certLines = certContent.split('\n').map((l) => l.replace(/^•\s*/, '').trim()).filter((l) => l.length > 5);
+    certifications.push(...certLines);
+  }
+
   return {
     name,
     summary,
-    education: education.length > 0 ? education : [{ degree: 'Engineering Degree', institution: 'University', year: 'Completed' }],
-    experience: experience.length > 0 ? experience : [{ role: 'Technical Professional', company: 'Previous Organization', duration: 'Recent', highlights: ['Led core software engineering and technical deliverables.'] }],
-    projects: projects.length > 0 ? projects : [{ name: 'System Implementation', description: 'Engineered high-performance computational workflows and APIs.', technologies: skills.slice(0, 4), metrics: '' }],
-    skills: skills.length > 0 ? skills : ['Python', 'FastAPI', 'LangChain', 'Docker', 'AWS'],
-    certifications: achievements,
+    education,
+    experience,
+    projects,
+    skills,
+    certifications,
     achievements,
     strengths: skills.slice(0, 5),
     potentialGaps: [],
@@ -325,122 +282,114 @@ export function parseResumeEvidenceDeterministically(
 ): CandidateEvidenceModel {
   const profile = parseResumeTextDeterministically(fileName, rawText);
   const structured = normalizeResumeText(rawText);
-  const { name, email, phone } = extractCandidateIdentity(structured, fileName);
+  const { name, email } = extractCandidateIdentity(structured, fileName);
+
+  const sections = detectSections(rawText);
+  const sectionsMap = new Map(sections.map((s) => [s.normalizedName, s.text]));
 
   const lines = structured.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  // Group skills logically
+  // Group skills logically based purely on extracted evidence
   const allSkills = profile.skills;
-  const techSkills: EvidenceItem[] = allSkills.slice(0, 10).map((s) => ({
+  const techSkills: EvidenceItem[] = allSkills.map((s) => ({
     value: s,
-    sourceText: lines.find((l) => l.toLowerCase().includes(s.toLowerCase())) || `Skill: ${s}`,
+    sourceText: lines.find((l) => l.toLowerCase().includes(s.toLowerCase())) || s,
     sourceLocation: { section: 'SKILLS' },
     confidence: 'high',
   }));
 
-  const prodSkills: EvidenceItem[] = allSkills.slice(10, 16).map((s) => ({
-    value: s,
-    sourceText: lines.find((l) => l.toLowerCase().includes(s.toLowerCase())) || `Skill: ${s}`,
-    sourceLocation: { section: 'SKILLS' },
-    confidence: 'medium',
-  }));
-
-  const domainSkills: EvidenceItem[] = [
-    { value: 'Agentic AI & RAG Workflows', sourceText: 'AI/ML & LLM Engineering', sourceLocation: { section: 'SKILLS' }, confidence: 'high' },
-    { value: 'Scalable FastAPI Backend', sourceText: 'FastAPI, Flask & Docker', sourceLocation: { section: 'SKILLS' }, confidence: 'high' },
-    { value: 'Vector Retrieval & FAISS', sourceText: 'FAISS caching & hybrid reasoning', sourceLocation: { section: 'SKILLS' }, confidence: 'high' },
-  ];
-
-  const workExperience: WorkExperienceEvidence[] = profile.experience.map((exp) => ({
+  const workExperience: WorkExperienceEvidence[] = profile.experience.map((exp, idx) => ({
     company: {
       value: exp.company,
-      sourceText: `${exp.role} | ${exp.company}`,
+      sourceText: exp.company,
       sourceLocation: { section: 'EXPERIENCE' },
+      parentBlockId: `exp_${idx + 1}`,
       confidence: 'high',
     },
     role: {
       value: exp.role,
       sourceText: exp.role,
       sourceLocation: { section: 'EXPERIENCE' },
-      confidence: 'high',
-    },
-    startDate: {
-      value: exp.duration.split(/[-–]/)[0]?.trim() || 'Recent',
-      sourceText: exp.duration,
-      sourceLocation: { section: 'EXPERIENCE' },
-      confidence: 'high',
-    },
-    endDate: {
-      value: exp.duration.split(/[-–]/)[1]?.trim() || 'Present',
-      sourceText: exp.duration,
-      sourceLocation: { section: 'EXPERIENCE' },
+      parentBlockId: `exp_${idx + 1}`,
       confidence: 'high',
     },
     bullets: exp.highlights.map((h) => ({
       value: h,
       sourceText: h,
       sourceLocation: { section: 'EXPERIENCE' },
+      parentBlockId: `exp_${idx + 1}`,
       confidence: 'high',
     })),
   }));
 
-  const projects: ProjectEvidence[] = profile.projects.map((p) => ({
+  const detectedProjects = detectProjectBoundaries(sectionsMap.get('projects') || '');
+  const projects: ProjectEvidence[] = detectedProjects.map((p, idx) => ({
     name: {
-      value: p.name,
-      sourceText: p.name,
+      value: p.heading,
+      sourceText: p.heading,
       sourceLocation: { section: 'PROJECTS' },
+      parentBlockId: p.id || `proj_${idx + 1}`,
       confidence: 'high',
     },
-    problem: {
-      value: p.description,
-      sourceText: p.description,
+    problem: p.lines.length > 0 ? {
+      value: p.lines[0],
+      sourceText: p.lines[0],
       sourceLocation: { section: 'PROJECTS' },
+      parentBlockId: p.id || `proj_${idx + 1}`,
       confidence: 'high',
-    },
-    contribution: {
-      value: `Built using ${p.technologies.join(', ') || 'modern architecture'}.`,
-      sourceText: p.description,
+    } : undefined,
+    contribution: p.lines.length > 1 ? {
+      value: p.lines.slice(1).join(' '),
+      sourceText: p.lines.slice(1).join(' '),
       sourceLocation: { section: 'PROJECTS' },
-      confidence: 'medium',
-    },
-    technologies: p.technologies.map((t) => ({
+      parentBlockId: p.id || `proj_${idx + 1}`,
+      confidence: 'high',
+    } : undefined,
+    technologies: (COMMON_SKILLS_DICTIONARY.filter((s) =>
+      new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(p.blockText)
+    )).map((t) => ({
       value: t,
       sourceText: t,
       sourceLocation: { section: 'PROJECTS' },
+      parentBlockId: p.id || `proj_${idx + 1}`,
       confidence: 'high',
     })),
-    outcomes: p.metrics ? [
-      {
-        value: p.metrics,
-        sourceText: p.description,
-        sourceLocation: { section: 'PROJECTS' },
-        confidence: 'high',
-      }
-    ] : [],
+    outcomes: [],
   }));
 
-  const education = profile.education.map((edu) => ({
-    degree: {
+  const detectedEduBlocks = detectEducationBoundaries(sectionsMap.get('education') || '');
+  const education = detectedEduBlocks.map((edu, idx) => ({
+    degree: edu.degree ? {
       value: edu.degree,
-      sourceText: edu.degree,
+      sourceText: edu.lines[0] || edu.degree,
       sourceLocation: { section: 'EDUCATION' },
-      confidence: 'high',
-    },
-    institution: {
+      parentBlockId: edu.id || `edu_${idx + 1}`,
+      confidence: 'high' as const,
+    } : undefined,
+    institution: edu.institution ? {
       value: edu.institution,
-      sourceText: edu.institution || edu.degree,
+      sourceText: edu.lines.join(' | '),
       sourceLocation: { section: 'EDUCATION' },
-      confidence: 'high',
-    },
-    year: {
+      parentBlockId: edu.id || `edu_${idx + 1}`,
+      confidence: 'high' as const,
+    } : undefined,
+    year: edu.year ? {
       value: edu.year,
-      sourceText: edu.year,
+      sourceText: edu.lines.join(' | '),
       sourceLocation: { section: 'EDUCATION' },
-      confidence: 'high',
-    },
+      parentBlockId: edu.id || `edu_${idx + 1}`,
+      confidence: 'high' as const,
+    } : undefined,
   }));
 
-  const certifications: EvidenceItem[] = profile.achievements.map((ach) => ({
+  const certifications: EvidenceItem[] = (profile.certifications || []).map((cert) => ({
+    value: cert,
+    sourceText: cert,
+    sourceLocation: { section: 'CERTIFICATIONS' },
+    confidence: 'high',
+  }));
+
+  const achievements: EvidenceItem[] = (profile.achievements || []).map((ach) => ({
     value: ach,
     sourceText: ach,
     sourceLocation: { section: 'ACHIEVEMENTS' },
@@ -449,35 +398,29 @@ export function parseResumeEvidenceDeterministically(
 
   return {
     identity: {
-      name: {
+      name: name ? {
         value: name,
         sourceText: name,
         sourceLocation: { section: 'HEADER' },
         confidence: 'high',
-      },
+      } : undefined,
       email: email ? {
         value: email,
         sourceText: email,
         sourceLocation: { section: 'HEADER' },
         confidence: 'high',
       } : undefined,
-      role: {
-        value: profile.experience[0]?.role || 'Python Developer (AI/ML & LLM Engineering)',
-        sourceText: profile.summary,
-        sourceLocation: { section: 'HEADER' },
-        confidence: 'high',
-      },
     },
     education,
     workExperience,
     projects,
     skills: {
       technical: techSkills,
-      product: prodSkills,
-      domain: domainSkills,
+      product: [],
+      domain: [],
     },
     certifications,
-    achievements: certifications,
+    achievements,
     unclear: [],
   };
 }

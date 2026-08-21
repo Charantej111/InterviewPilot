@@ -16,8 +16,8 @@ export const QuestionReattemptModal: React.FC<QuestionReattemptModalProps> = ({
   isOpen,
   onClose,
   question,
-  targetRole,
-  targetCompany,
+  targetRole: _targetRole,
+  targetCompany: _targetCompany,
 }) => {
   const [newAnswer, setNewAnswer] = useState('');
   const [isEvaluating, setIsEvaluating] = useState(false);

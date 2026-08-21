@@ -12,9 +12,12 @@ export interface ClientGeminiConfig {
 }
 
 export const CANDIDATE_GEMINI_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-flash-latest',
+  'gemini-3.6-flash',
 ];
 
 export function cleanJsonText(raw: string): string {
@@ -53,12 +56,27 @@ export function cleanJsonText(raw: string): string {
 }
 
 const getEffectiveApiKey = (customKey?: string): string => {
-  return (
-    customKey ||
-    (import.meta as any).env?.VITE_GEMINI_API_KEY ||
-    (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY ||
-    ''
-  );
+  let key = (customKey || '').trim();
+
+  if (!key && typeof import.meta !== 'undefined' && import.meta.env) {
+    key = (import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+  }
+
+  if (!key && typeof process !== 'undefined' && process.env) {
+    key = (process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+  }
+
+  if (!key) {
+    throw new Error('[Client Gemini] API key is missing. Please set VITE_GEMINI_API_KEY in your .env file.');
+  }
+
+  if (!key.startsWith('AIza')) {
+    throw new Error(
+      `[Client Gemini] Valid Google AI Studio API key (AIza...) required. The current key starts with "${key.slice(0, 5)}...". Please generate a free Google AI Studio API key at https://aistudio.google.com/apikey and set it as VITE_GEMINI_API_KEY in your .env file.`
+    );
+  }
+
+  return key;
 };
 
 /**
@@ -70,9 +88,6 @@ export async function callClientGeminiStructured<T>(
   config?: ClientGeminiConfig
 ): Promise<T> {
   const apiKey = getEffectiveApiKey(config?.apiKey);
-  if (!apiKey || (!apiKey.startsWith('AIza') && apiKey.startsWith('AQ.'))) {
-    throw new Error('[Client Gemini] Valid Google AI Studio API key (AIza...) required.');
-  }
 
   const candidateModels = config?.model
     ? [config.model, ...CANDIDATE_GEMINI_MODELS.filter((m) => m !== config.model)]
@@ -163,9 +178,6 @@ export async function callClientGemini(
   config?: ClientGeminiConfig
 ): Promise<string> {
   const apiKey = getEffectiveApiKey(config?.apiKey);
-  if (!apiKey || (!apiKey.startsWith('AIza') && apiKey.startsWith('AQ.'))) {
-    throw new Error('[Client Gemini] Valid Google AI Studio API key (AIza...) required.');
-  }
 
   const candidateModels = config?.model
     ? [config.model, ...CANDIDATE_GEMINI_MODELS.filter((m) => m !== config.model)]

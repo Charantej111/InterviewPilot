@@ -24,7 +24,7 @@ export const COMPANY_TRACKS: CompanyTrack[] = [
     recommendedRole: 'Software Engineer (L5/L6) or Product Manager',
     interviewType: 'mixed',
     difficulty: 'advanced',
-    style: 'interviewer_led',
+    style: 'challenging',
     focusAreas: [
       'First-Principles Problem Decomposition',
       'System Architecture & Massive Scale Tradeoffs',
@@ -62,7 +62,7 @@ export const COMPANY_TRACKS: CompanyTrack[] = [
     recommendedRole: 'Full Stack Engineer (E5) or Product Manager',
     interviewType: 'mixed',
     difficulty: 'advanced',
-    style: 'rapid_fire',
+    style: 'challenging',
     focusAreas: [
       'Product Intuition & Counter-Metrics',
       'Execution Speed & Pragmatic Tradeoffs',
@@ -80,8 +80,8 @@ export const COMPANY_TRACKS: CompanyTrack[] = [
     tagline: 'Obsessive technical craft, developer empathy & API rigor',
     recommendedRole: 'Backend Engineer (L3/L4) or Infrastructure Specialist',
     interviewType: 'technical',
-    difficulty: 'expert',
-    style: 'realistic',
+    difficulty: 'advanced',
+    style: 'challenging',
     focusAreas: [
       'Extreme Communication Clarity & Written Rigor',
       'Clean API Contract & Failure Mode Design',
@@ -100,7 +100,7 @@ export const COMPANY_TRACKS: CompanyTrack[] = [
     recommendedRole: 'Systems Software Engineer or Core OS Specialist',
     interviewType: 'mixed',
     difficulty: 'advanced',
-    style: 'interviewer_led',
+    style: 'challenging',
     focusAreas: [
       'Attention to Detail & Deep Domain Mastery',
       'Cross-Functional Collaboration Under Secrecy',
@@ -119,7 +119,7 @@ export const COMPANY_TRACKS: CompanyTrack[] = [
     recommendedRole: 'Senior Software Engineer (L5+)',
     interviewType: 'behavioral',
     difficulty: 'advanced',
-    style: 'conversational',
+    style: 'realistic',
     focusAreas: [
       'Context Over Control',
       'High Candor & Direct Disagreement',
