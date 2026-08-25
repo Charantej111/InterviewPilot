@@ -37,6 +37,21 @@ export const FinalReportPage: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
 
+    // Route guard check
+    if (activeSession && activeSession.id === id) {
+      const isCompleted =
+        activeSession.status === 'completed' ||
+        activeSession.status === 'report_generating' ||
+        activeSession.status === 'report_ready' ||
+        activeSession.status === 'report_failed';
+
+      if (!isCompleted) {
+        console.warn('[InterviewIntegrity] Blocked premature feedback navigation');
+        navigate(`/interview/${id}`, { replace: true });
+        return;
+      }
+    }
+
     // Check if report in context already matches this session ID
     if (finalReport && finalReport.overallScore && (finalReport.sessionId === id || !id)) {
       setReport(finalReport);
@@ -270,15 +285,6 @@ export const FinalReportPage: React.FC = () => {
       {/* SCREEN UI VIEW */}
       <div className="max-w-2xl mx-auto space-y-6 text-left pb-20 px-4 relative">
         
-        {/* Professional Lottie Confetti Overlay (plays once, not in a loop, hidden on print) */}
-        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden no-print w-screen h-screen lottie-confetti">
-          <DotLottieReact
-            src="https://lottie.host/da9372ce-6130-441a-92c3-aadf1e2c9455/aolJoiRiBM.lottie"
-            loop={false}
-            autoplay
-            style={{ width: '100vw', height: '100vh', objectFit: 'cover' }}
-          />
-        </div>
 
         {/* Screen Header Bar */}
         <div className="flex items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800 screen-only">
@@ -377,6 +383,18 @@ export const FinalReportPage: React.FC = () => {
               {activeReport.summary}
             </p>
           </div>
+
+          {/* Professional Lottie Confetti Overlay (plays once, not in a loop, hidden on print) */}
+          {activeReport.overallScore > 5 && (
+            <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden no-print w-screen h-screen lottie-confetti">
+              <DotLottieReact
+                src="https://lottie.host/da9372ce-6130-441a-92c3-aadf1e2c9455/aolJoiRiBM.lottie"
+                loop={false}
+                autoplay
+                style={{ width: '100vw', height: '100vh', objectFit: 'cover' }}
+              />
+            </div>
+          )}
 
           {/* SPOKEN VERBAL DELIVERY TELEMETRY CARD */}
           <div className="p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left space-y-3 screen-only">

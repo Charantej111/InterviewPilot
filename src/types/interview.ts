@@ -396,11 +396,61 @@ export interface TurnTimingMetrics {
   nextQuestionGeneratedAt?: string;
 }
 
+export type InterviewSessionStatus =
+  | 'not_started'
+  | 'starting'
+  | 'active'
+  | 'evaluating'
+  | 'generating_next'
+  | 'closing'
+  | 'completed'
+  | 'failed'
+  | 'paused';
+
+export type InterviewTurnState =
+  | 'idle'
+  | 'interviewer_speaking'
+  | 'candidate_listening'
+  | 'candidate_speaking'
+  | 'processing_answer'
+  | 'evaluating'
+  | 'generating_question'
+  | 'completed';
+
+export interface ActiveInterviewTurn {
+  turnId: string;
+  questionId: string; // REAL DATABASE UUID
+  sequenceNumber: number;
+  questionText: string;
+  status:
+    | 'question_generating'
+    | 'question_ready'
+    | 'interviewer_speaking'
+    | 'candidate_listening'
+    | 'candidate_speaking'
+    | 'processing'
+    | 'evaluating'
+    | 'generating_question'
+    | 'completed'
+    | 'failed';
+  submissionStarted: boolean;
+  submissionCompleted: boolean;
+  createdAt: string;
+  answerStartedAt?: string;
+  answerSubmittedAt?: string;
+}
+
 export interface InterviewSession {
   id: string;
   createdAt: string;
   completedAt?: string;
   status: 'draft' | 'preparing' | 'ready' | 'in_progress' | 'completing' | 'evaluating' | 'completed' | 'report_generating' | 'report_ready' | 'report_failed' | 'failed';
+  sessionStatus?: InterviewSessionStatus;
+  turnState?: InterviewTurnState;
+  completionReason?: 'TIME_EXPIRED' | 'BRAIN_CLOSING' | 'CONTRACT_COMPLETED' | 'EXPLICIT_EXIT' | null;
+  closingTurnCompleted?: boolean;
+  activeTurnId?: string | null;
+  activeTurn?: ActiveInterviewTurn | null;
   mode: InterviewMode;
   voiceProvider?: string | null;
   voiceSessionId?: string | null;

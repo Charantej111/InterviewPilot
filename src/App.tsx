@@ -1,8 +1,8 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
 import { UserProvider } from './context/UserContext';
-import { InterviewProvider } from './context/InterviewContext';
+import { InterviewProvider, useInterview } from './context/InterviewContext';
 
 // Pages
 import { LandingPage } from './pages/LandingPage';
@@ -20,6 +20,26 @@ import { SettingsPage } from './pages/SettingsPage';
 
 import { CustomCursor } from './components/ui/CustomCursor';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+
+export const CompletionRouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { id } = useParams<{ id: string }>();
+  const { activeSession } = useInterview();
+
+  if (activeSession && activeSession.id === id) {
+    const isCompleted =
+      activeSession.status === 'completed' ||
+      activeSession.status === 'report_generating' ||
+      activeSession.status === 'report_ready' ||
+      activeSession.status === 'report_failed';
+
+    if (!isCompleted) {
+      console.warn('[InterviewIntegrity] Blocked premature feedback navigation');
+      return <Navigate to={`/interview/${id}`} replace />;
+    }
+  }
+
+  return <>{children}</>;
+};
 
 export const App: React.FC = () => {
   return (
@@ -86,7 +106,9 @@ export const App: React.FC = () => {
                 path="/interview/:id/feedback"
                 element={
                   <ProtectedRoute>
-                    <QuestionFeedbackPage />
+                    <CompletionRouteGuard>
+                      <QuestionFeedbackPage />
+                    </CompletionRouteGuard>
                   </ProtectedRoute>
                 }
               />
@@ -94,7 +116,9 @@ export const App: React.FC = () => {
                 path="/interview/:id/report"
                 element={
                   <ProtectedRoute>
-                    <FinalReportPage />
+                    <CompletionRouteGuard>
+                      <FinalReportPage />
+                    </CompletionRouteGuard>
                   </ProtectedRoute>
                 }
               />

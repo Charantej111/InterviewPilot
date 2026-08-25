@@ -5,8 +5,10 @@ import {
   VoiceSessionConfig,
   VoiceEventListeners,
   VoiceError,
+  VoiceSessionController,
 } from './VoiceProvider';
 import { TurnDetectionController } from './turnDetection';
+import { reduceSpeechRecognitionResult } from '../ai/interviewLifecycle';
 
 /**
  * Production Real-Time Conversational Voice Provider
@@ -17,7 +19,7 @@ import { TurnDetectionController } from './turnDetection';
  * - Microphone/TTS Audio Isolation: Suspends mic during interviewer playback to eliminate echo loopback.
  * - Resilience: Recovers and restarts on unexpected Web Speech API onend events without dropping speech.
  */
-export class GeminiLiveVoiceProvider implements VoiceProvider {
+export class GeminiLiveVoiceProvider implements VoiceProvider, VoiceSessionController {
   public readonly id = 'gemini_live';
   public status: VoiceStatus = 'idle';
   public interviewState: VoiceInterviewState = 'idle';
@@ -75,30 +77,28 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
 
         this.speechRecognition.onresult = (event: any) => {
           // If AI is speaking, ignore incoming mic frames to prevent audio loopback
-          if (this.isAISpeaking) {
+          if (this.isAISpeaking || this.interviewState === 'interviewer_speaking') {
             return;
           }
 
-          let accumulatedFinal = '';
-          let currentInterim = '';
+          let state = {
+            finalTranscript: this.initialTurnTranscript,
+            interimTranscript: '',
+            displayTranscript: ''
+          };
 
-          for (let i = 0; i < event.results.length; ++i) {
-            const resultItem = event.results[i];
-            if (resultItem.isFinal) {
-              accumulatedFinal += resultItem[0].transcript + ' ';
-            } else {
-              currentInterim += resultItem[0].transcript;
-            }
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const item = event.results[i];
+            state = reduceSpeechRecognitionResult(state, {
+              isFinal: item.isFinal,
+              transcript: item[0].transcript
+            });
           }
 
-          this.finalTranscript = (this.initialTurnTranscript + ' ' + accumulatedFinal).trim();
-          this.interimTranscript = currentInterim.trim();
+          this.finalTranscript = state.finalTranscript;
+          this.interimTranscript = state.interimTranscript;
 
-          const displayTranscript = (
-            this.finalTranscript +
-            (this.finalTranscript && this.interimTranscript ? ' ' : '') +
-            this.interimTranscript
-          ).trim();
+          const displayTranscript = state.displayTranscript;
 
           this.listeners?.onTranscript(
             displayTranscript,
@@ -128,6 +128,10 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
           // Resilient auto-restart if candidate is still in an active listening/answering turn
           const shouldBeListening =
             !this.isAISpeaking &&
+            this.interviewState !== 'interviewer_speaking' &&
+            this.interviewState !== 'processing' &&
+            this.interviewState !== 'idle' &&
+            this.interviewState !== 'completed' &&
             (this.interviewState === 'listening' ||
               this.interviewState === 'candidate_speaking' ||
               this.interviewState === 'candidate_paused');
@@ -214,14 +218,15 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
 
     // 1. Audio Isolation: Stop microphone input during interviewer speech
     this.isAISpeaking = true;
+    this.updateInterviewState('interviewer_speaking');
+    this.updateStatus('speaking');
+
     if (this.speechRecognition) {
       try {
         this.speechRecognition.stop();
       } catch (_) {}
     }
 
-    this.updateStatus('speaking');
-    this.updateInterviewState('interviewer_speaking');
     this.listeners?.onSpeechStart('ai');
 
     return new Promise((resolve) => {
@@ -237,27 +242,35 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
           utterance.voice = naturalVoice;
         }
 
-        utterance.onend = () => {
+        utterance.onend = async () => {
           this.isAISpeaking = false;
           this.listeners?.onSpeechEnd('ai');
+          
+          // Audio settling period: 250ms
+          await new Promise((r) => setTimeout(r, 250));
+
           this.updateInterviewState('listening');
           this.updateStatus('listening');
 
           // Resume microphone for candidate response
-          this.startListening();
+          await this.startListening();
           resolve();
         };
 
-        utterance.onerror = (e: any) => {
+        utterance.onerror = async (e: any) => {
           if (e.error !== 'canceled' && e.error !== 'interrupted') {
             console.warn('Speech synthesis event:', e.error || e);
           }
           this.isAISpeaking = false;
           this.listeners?.onSpeechEnd('ai');
+          
+          // Audio settling period: 250ms
+          await new Promise((r) => setTimeout(r, 250));
+
           this.updateInterviewState('listening');
           this.updateStatus('listening');
 
-          this.startListening();
+          await this.startListening();
           resolve();
         };
 
@@ -383,5 +396,56 @@ export class GeminiLiveVoiceProvider implements VoiceProvider {
   private handleError(err: VoiceError): void {
     this.updateStatus('error');
     this.listeners?.onError(err);
+  }
+
+  // VoiceSessionController methods implementation
+  public async startInterviewerSpeech(text: string): Promise<void> {
+    await this.speak(text);
+  }
+
+  public stopInterviewerSpeech(): void {
+    this.stopAudio();
+  }
+
+  public async startCandidateListening(): Promise<void> {
+    await this.startListening();
+  }
+
+  public stopCandidateListening(): void {
+    this.stopListening();
+  }
+
+  public pauseRecognition(): void {
+    if (this.speechRecognition) {
+      try {
+        this.speechRecognition.stop();
+      } catch (_) {}
+    }
+  }
+
+  public resumeRecognition(): void {
+    const shouldBeListening =
+      !this.isAISpeaking &&
+      this.interviewState !== 'interviewer_speaking' &&
+      this.interviewState !== 'processing' &&
+      this.interviewState !== 'idle' &&
+      this.interviewState !== 'completed' &&
+      (this.interviewState === 'listening' ||
+        this.interviewState === 'candidate_speaking' ||
+        this.interviewState === 'candidate_paused');
+
+    if (shouldBeListening && this.speechRecognition) {
+      try {
+        this.speechRecognition.start();
+      } catch (_) {}
+    }
+  }
+
+  public async finishCandidateTurn(): Promise<void> {
+    this.forceSubmitCurrentTurn();
+  }
+
+  public cleanup(): void {
+    this.disconnect();
   }
 }

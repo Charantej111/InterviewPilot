@@ -13,6 +13,7 @@ import {
   InterviewEngineState,
   ConversationTurn,
   InterviewConversationState,
+  ActiveInterviewTurn,
 } from '../types/interview';
 import { CandidateProfile, CandidateEvidenceModel, LockedCandidateContext } from '../types/resume';
 import { JobProfile, JDEvidenceModel } from '../types/jobDescription';
@@ -30,6 +31,7 @@ import { voiceManager } from '../services/voice/voiceManager';
 import { interviewBrain } from '../services/ai/interviewBrain';
 import { buildInterviewContract } from '../services/ai/interviewContract';
 import { initializeCompetencyMap, updateCompetencyState } from '../services/ai/competencyMap';
+import { shouldCompleteInterview } from '../services/ai/interviewLifecycle';
 import { storage } from '../lib/storage';
 
 
@@ -108,7 +110,6 @@ interface InterviewContextType {
   latestFeedback: QuestionFeedback | null;
   finalReport: FinalReport | null;
   isEvaluating: boolean;
-  isPreparingNextQuestion: boolean;
   isInterrupted: boolean;
   
   // Time Management
@@ -124,8 +125,7 @@ interface InterviewContextType {
   startVoiceSession: () => Promise<void>;
   stopVoiceSession: () => Promise<void>;
   switchToTextMode: () => Promise<void>;
-  submitCandidateAnswer: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => Promise<QuestionFeedback>;
-  advanceToNextQuestion: () => Promise<boolean>;
+  submitCurrentTurn: (answerText: string, inputMode: 'text' | 'voice', durationSecs: number) => Promise<{ status: InterviewSession['status']; feedback?: QuestionFeedback }>;
   completeInterviewSession: (finalAnswer?: {
     questionId: string;
     answerText: string;
@@ -196,7 +196,6 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [latestFeedback, setLatestFeedback] = useState<QuestionFeedback | null>(null);
   const [finalReport, setFinalReport] = useState<FinalReport | null>(() => storage.get('final_report', null));
   const [isEvaluating, setIsEvaluating] = useState<boolean>(false);
-  const [isPreparingNextQuestion, setIsPreparingNextQuestion] = useState<boolean>(false);
 
   // Time tracking
   const [timerSeconds, setTimerSeconds] = useState<number>(0);
@@ -214,6 +213,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const consecutiveScoresRef = useRef<number[]>([]);
+  const inFlightSubmissionsRef = useRef<Record<string, Promise<any> | undefined>>({});
 
   // Timer Tick Effect
   useEffect(() => {
@@ -639,11 +639,27 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         questions: questionsToUse,
       });
 
+      const firstQ = questionsToUse[0];
+      const initialTurn: ActiveInterviewTurn = {
+        turnId: `turn_${Date.now()}_0`,
+        questionId: firstQ.id,
+        sequenceNumber: 1,
+        questionText: firstQ.text,
+        status: mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
+        submissionStarted: false,
+        submissionCompleted: false,
+        createdAt: new Date().toISOString(),
+      };
+
       const enrichedSession: InterviewSession = {
         ...session,
         interviewContract: contract,
         competencyMap: initialCompetencyMap,
         currentObjective: openingObjective,
+        sessionStatus: 'active',
+        turnState: mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
+        activeTurnId: initialTurn.turnId,
+        activeTurn: initialTurn,
       };
 
       setActiveSession(enrichedSession);
@@ -656,6 +672,18 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       return enrichedSession;
     } else {
+      const firstQ = questionsToUse[0];
+      const initialTurn: ActiveInterviewTurn = {
+        turnId: `turn_${Date.now()}_0`,
+        questionId: firstQ.id,
+        sequenceNumber: 1,
+        questionText: firstQ.text,
+        status: mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
+        submissionStarted: false,
+        submissionCompleted: false,
+        createdAt: new Date().toISOString(),
+      };
+
       const fallbackSession: InterviewSession = {
         ...createEmptySession(),
         id: sessionId,
@@ -668,9 +696,13 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         mode,
         questions: questionsToUse,
         status: 'in_progress',
+        sessionStatus: 'active',
+        turnState: mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
         interviewContract: contract,
         competencyMap: initialCompetencyMap,
         currentObjective: openingObjective,
+        activeTurnId: initialTurn.turnId,
+        activeTurn: initialTurn,
       };
 
       setActiveSession(fallbackSession);
@@ -702,6 +734,42 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     if (loaded) {
+      // Restore or lazily initialize ActiveInterviewTurn
+      let activeTurn = loaded.activeTurn;
+      const currentQ = loaded.questions?.[loaded.currentQuestionIndex || 0] || loaded.questions?.[0];
+      
+      if (!activeTurn && currentQ) {
+        activeTurn = {
+          turnId: loaded.activeTurnId || `turn_${Date.now()}_${loaded.currentQuestionIndex || 0}`,
+          questionId: currentQ.id,
+          sequenceNumber: (loaded.currentQuestionIndex || 0) + 1,
+          questionText: currentQ.text,
+          status: loaded.mode === 'voice' ? 'candidate_listening' : 'candidate_listening',
+          submissionStarted: false,
+          submissionCompleted: false,
+          createdAt: new Date().toISOString(),
+        };
+      }
+
+      const currentTurn = activeTurn;
+      if (currentTurn && loaded.questions) {
+        const questionExists = loaded.questions.some(q => q.id === currentTurn.questionId);
+        if (!questionExists && currentQ) {
+          console.warn('[SessionRestoration] Active turn question not found in database questions, recovering safely.');
+          activeTurn = {
+            ...currentTurn,
+            questionId: currentQ.id,
+            questionText: currentQ.text,
+            sequenceNumber: (loaded.currentQuestionIndex || 0) + 1,
+          };
+        }
+      }
+
+      loaded.activeTurn = activeTurn;
+      if (activeTurn) {
+        loaded.activeTurnId = activeTurn.turnId;
+      }
+
       setActiveSession(loaded);
       storage.set('current_session', loaded);
 
@@ -720,6 +788,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const activeQuestion: Question = 
+    activeSession.questions?.find(q => q.id === activeSession.activeTurn?.questionId) ||
     activeSession.questions?.[activeSession.currentQuestionIndex] || 
     activeSession.questions?.[0] || {
       id: 'q_init',
@@ -788,15 +857,13 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             setEngineState('asking');
           }
         },
-        onSpeechEnd: async (speaker, finalTranscript) => {
-          if (speaker === 'candidate' && finalTranscript && finalTranscript.trim().length >= 5) {
-            await submitCandidateAnswer(finalTranscript.trim(), 'voice', 60);
-          }
+        onSpeechEnd: async (_speaker, finalTranscript) => {
+          // Handled authoritatively by silence detection and manual finish answer buttons
+          console.log('[VoiceMode] Candidate finished utterance:', finalTranscript);
         },
         onAnswerAutoCompleted: async (finalAnswer) => {
           if (finalAnswer && finalAnswer.trim().length >= 5) {
-            await submitCandidateAnswer(finalAnswer.trim(), 'voice', 60);
-            await advanceToNextQuestion();
+            await submitCurrentTurn(finalAnswer.trim(), 'voice', 60);
           }
         },
         onInterruption: () => {
@@ -863,251 +930,370 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   /**
-   * Submits a candidate answer, executes real AI evaluation, and manages follow-up decisions.
+   * Authoritative answer submission gateway.
+   * Handles idempotency, turn locks, database answer/question safety, evaluation, brain updates, and next question generation.
    */
-  const submitCandidateAnswer = async (
-    answerText: string, 
-    inputMode: 'text' | 'voice', 
+  const submitCurrentTurn = async (
+    answerText: string,
+    inputMode: 'text' | 'voice',
     durationSecs: number
-  ): Promise<QuestionFeedback> => {
-    setIsEvaluating(true);
-    setEngineState('processing');
-
-    try {
-      let answerId = `ans_${Date.now()}`;
-      if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_')) {
-        const res = await interviewService.submitAnswer(
-          user.id,
-          activeSession.id,
-          activeQuestion.id,
-          answerText,
-          inputMode,
-          durationSecs,
-          inputMode === 'voice' ? answerText : undefined
-        );
-        answerId = res.answerId;
+  ): Promise<{ status: InterviewSession['status']; feedback?: QuestionFeedback }> => {
+    // 1. Determine active turn
+    let turn = activeSession.activeTurn;
+    if (!turn) {
+      const currentQ = activeSession.questions?.[activeSession.currentQuestionIndex || 0] || activeSession.questions?.[0];
+      if (!currentQ) {
+        throw new Error('No active question or turn found.');
       }
-
-      // 1. Layer 1 & 2: Real AI Evaluation & Follow-up Trigger Analysis
-      let feedbackResult: QuestionFeedback & { followUpNeeded?: boolean; followUpTriggerReason?: string; followUpTopic?: string };
-
-      if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_')) {
-        feedbackResult = await evaluationService.evaluateAndSaveAnswer({
-          userId: user.id,
-          interviewId: activeSession.id,
-          answerId,
-          question: activeQuestion,
-          answerText,
-          role: activeSession.jobTitle,
-          company: activeSession.company,
-          difficulty: activeSession.difficulty,
-          remainingMinutes: Math.round(remainingSeconds / 60),
-        });
-      } else {
-        feedbackResult = await aiService.evaluateAnswer({
-          question: activeQuestion,
-          answerText,
-          role: activeSession.jobTitle,
-          company: activeSession.company,
-          difficulty: activeSession.difficulty,
-          remainingMinutes: Math.round(remainingSeconds / 60),
-        });
-      }
-
-      setLatestFeedback(feedbackResult);
-
-      // Record Turn in Rolling History
-      const turn: ConversationTurn = {
-        role: 'candidate',
-        text: answerText,
-        timestamp: new Date().toISOString(),
-        questionId: activeQuestion.id,
-        isFollowUp: activeQuestion.type === 'follow_up',
+      turn = {
+        turnId: activeSession.activeTurnId || `turn_${Date.now()}_${activeSession.currentQuestionIndex || 0}`,
+        questionId: currentQ.id,
+        sequenceNumber: (activeSession.currentQuestionIndex || 0) + 1,
+        questionText: currentQ.text,
+        status: 'candidate_listening',
+        submissionStarted: false,
+        submissionCompleted: false,
+        createdAt: new Date().toISOString(),
       };
-      conversationStateRef.current.recentTurns.push(turn);
-      conversationStateRef.current.conversationSummary += `\nCandidate on Q (${activeQuestion.category}): ${answerText.slice(0, 140)}...`;
-
-      // 2. Update Live Competency Map & Score History
-      let updatedCompetencyMap = activeSession.competencyMap || {};
-      const activeObj = activeSession.currentObjective || {
-        targetCompetency: activeQuestion.targetCompetency || activeQuestion.category || 'Technical Depth',
-        questionType: activeQuestion.questionType || 'product_sense',
-        intent: activeQuestion.intent || 'Assess candidate approach',
-        useResumeGrounding: activeQuestion.source === 'resume',
-        difficulty: activeQuestion.difficulty || activeSession.difficulty || 'intermediate',
-        timeAllocationSeconds: 180,
-        isFollowUp: activeQuestion.type === 'follow_up',
-        expectedSignals: activeQuestion.expectedSignals || activeQuestion.expectedAnswerCharacteristics,
-      };
-
-      const targetCompName = activeObj.targetCompetency;
-      if (targetCompName && updatedCompetencyMap[targetCompName]) {
-        const updatedState = updateCompetencyState(
-          updatedCompetencyMap[targetCompName],
-          feedbackResult,
-          activeObj,
-          answerText
-        );
-        updatedCompetencyMap = {
-          ...updatedCompetencyMap,
-          [targetCompName]: updatedState,
-        };
-      }
-
-      if (feedbackResult.overallScore !== undefined) {
-        consecutiveScoresRef.current.push(feedbackResult.overallScore);
-      }
-
-      // Normal session state update without immediate follow-up
-      const updatedSession: InterviewSession = {
-        ...activeSession,
-        competencyMap: updatedCompetencyMap,
-        answers: {
-          ...activeSession.answers,
-          [activeQuestion.id]: {
-            questionId: activeQuestion.id,
-            answerText,
-            inputMode,
-            durationSeconds: durationSecs,
-            submittedAt: new Date().toISOString(),
-            transcript: inputMode === 'voice' ? answerText : undefined,
-          },
-        },
-        feedbacks: {
-          ...activeSession.feedbacks,
-          [activeQuestion.id]: feedbackResult,
-        },
-      };
-      setActiveSession(updatedSession);
-      storage.set('current_session', updatedSession);
-
-      return feedbackResult;
-    } finally {
-      setIsEvaluating(false);
     }
-  };
 
-  const advanceToNextQuestion = async (): Promise<boolean> => {
-    setIsPreparingNextQuestion(true);
-    try {
-      const nextIndex = activeSession.currentQuestionIndex + 1;
-      const currentQ = activeSession.questions[activeSession.currentQuestionIndex];
-      const lastFeedback = (latestFeedback || (currentQ?.id ? activeSession.feedbacks[currentQ.id] : null)) as QuestionFeedback;
-      const candidateLastAnswer = currentQ?.id ? activeSession.answers[currentQ.id]?.answerText || '' : '';
+    const turnId = turn.turnId;
 
-      const isJdProvided = Boolean(
-        setupDraft.jobDescriptionProvided &&
-        setupDraft.jdEvidenceModel &&
-        (setupDraft.jdEvidenceModel.requiredSkills?.length ||
-          setupDraft.jdEvidenceModel.technicalRequirements?.length ||
-          setupDraft.jdEvidenceModel.responsibilities?.length)
-      );
+    // 2. True Idempotency: Reuse in-flight promise if one exists
+    if (inFlightSubmissionsRef.current[turnId]) {
+      console.log(`[Idempotency Gate] Reusing in-flight submission for turn ${turnId}`);
+      return inFlightSubmissionsRef.current[turnId];
+    }
 
-      const contract = activeSession.interviewContract || buildInterviewContract(
-        activeSession.id,
-        (activeSession.durationMinutes || 20) * 60,
-        setupDraft.lockedCandidateContext,
-        isJdProvided ? setupDraft.jdEvidenceModel : null,
-        isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
-      );
+    if (turn.submissionStarted || turn.status === 'evaluating') {
+      console.log(`[Idempotency Gate] Turn ${turnId} already submitted or evaluating, returning current state`);
+      const currentQ = activeSession.questions?.[activeSession.currentQuestionIndex];
+      const feedback = currentQ ? activeSession.feedbacks?.[currentQ.id] : undefined;
+      return { status: activeSession.status, feedback };
+    }
 
-      const currentCompetencyMap = activeSession.competencyMap || initializeCompetencyMap(
-        contract,
-        setupDraft.lockedCandidateContext,
-        isJdProvided ? setupDraft.jdEvidenceModel : null
-      );
+    // 3. Define and execute submission promise
+    const submissionPromise = (async () => {
+      // Transition turn and session states to evaluating
+      const updatedTurn: ActiveInterviewTurn = {
+        ...turn!,
+        status: 'evaluating',
+        submissionStarted: true,
+        answerStartedAt: turn!.answerStartedAt || new Date(Date.now() - durationSecs * 1000).toISOString(),
+        answerSubmittedAt: new Date().toISOString(),
+      };
 
-      // Decision from Brain
-      const brainDecision = interviewBrain.selectNextObjective(
-        contract,
-        currentCompetencyMap,
-        lastFeedback,
-        conversationStateRef.current.recentTurns,
-        remainingSeconds,
-        consecutiveScoresRef.current,
-        setupDraft.lockedCandidateContext
-      );
+      const evaluatingSession = {
+        ...activeSession,
+        sessionStatus: 'evaluating' as const,
+        turnState: 'evaluating' as const,
+        activeTurn: updatedTurn,
+      };
+      setActiveSession(evaluatingSession);
+      storage.set('current_session', evaluatingSession);
+      setIsEvaluating(true);
+      setEngineState('processing');
 
-      const nextObjective = brainDecision.nextObjective;
-
-      // Check if closing objective selected or duration/questions budget reached
-      const isClosing = nextObjective.questionType === 'closing' || remainingSeconds <= 0;
-
-      if (isClosing) {
-        setEngineState('completing');
-        const updatedSession = {
-          ...activeSession,
-          status: 'completed' as const,
-          completedAt: new Date().toISOString(),
-          competencyMap: currentCompetencyMap,
-        };
-        setActiveSession(updatedSession);
-        storage.set('current_session', updatedSession);
-
-        if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'completed', 0);
+      try {
+        let answerId = `ans_${Date.now()}`;
+        
+        // Assert valid UUID on questionId
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(updatedTurn.questionId)) {
+          throw new Error(`PersistenceContractError: Question ID "${updatedTurn.questionId}" is not a valid UUID.`);
         }
 
-        return false;
-      }
+        // Persist Answer to Database
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_')) {
+          const res = await interviewService.submitAnswer(
+            user.id,
+            activeSession.id,
+            updatedTurn.questionId,
+            answerText,
+            inputMode,
+            durationSecs,
+            inputMode === 'voice' ? answerText : undefined
+          );
+          answerId = res.answerId;
+        }
 
-      // Generate dynamic next question for the selected objective
-      const dynamicNextQ = await aiService.generateAdaptiveQuestion({
-        objective: nextObjective,
-        previousQuestionText: currentQ?.text || '',
-        candidateAnswerText: candidateLastAnswer,
-        role: activeSession.jobTitle,
-        companyName: activeSession.company,
-        isFollowUp: nextObjective.isFollowUp,
-        style: activeSession.interviewStyle,
-        existingQuestions: activeSession.questions || [],
-        lockedContext: setupDraft.lockedCandidateContext,
-        jdEvidenceModel: isJdProvided ? setupDraft.jdEvidenceModel : null,
-      });
+        // Run Answer Evaluation
+        const currentQ = activeSession.questions?.find(q => q.id === updatedTurn.questionId) || activeSession.questions?.[activeSession.currentQuestionIndex];
+        if (!currentQ) {
+          throw new Error('Question data not found for evaluation');
+        }
 
-      const updatedQuestions = [...(activeSession.questions || []), dynamicNextQ];
-      const updatedSession: InterviewSession = {
-        ...activeSession,
-        questions: updatedQuestions,
-        currentQuestionIndex: nextIndex,
-        currentQuestionId: dynamicNextQ.id,
-        currentObjective: nextObjective,
-        competencyMap: currentCompetencyMap,
-        interviewContract: contract,
-      };
+        let feedbackResult: QuestionFeedback;
+        const useClientAI = import.meta.env.VITE_USE_CLIENT_AI === 'true' || !import.meta.env.VITE_SUPABASE_FUNCTIONS_DEPLOYED;
 
-      setActiveSession(updatedSession);
-      storage.set('current_session', updatedSession);
-      setLiveTranscript('');
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !useClientAI) {
+          feedbackResult = await evaluationService.evaluateAndSaveAnswer({
+            userId: user.id,
+            interviewId: activeSession.id,
+            answerId,
+            question: currentQ,
+            answerText,
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            difficulty: activeSession.difficulty,
+            remainingMinutes: Math.round(remainingSeconds / 60),
+          });
+        } else {
+          feedbackResult = await aiService.evaluateAnswer({
+            question: currentQ,
+            answerText,
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            difficulty: activeSession.difficulty,
+            remainingMinutes: Math.round(remainingSeconds / 60),
+          });
+        }
 
-      if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-        await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
-      }
+        setLatestFeedback(feedbackResult);
 
-      // Voice Mode: Speak the next question aloud
-      if (activeSession.mode === 'voice') {
-        const provider = voiceManager.getVoiceProvider();
-        setEngineState('asking');
-        const bridgeRemark = await aiService.generateInterviewerRemark({
-          action: nextObjective.isFollowUp ? 'ask_question' : 'transition',
-          candidateName: setupDraft.candidateProfile?.name || 'Candidate',
-          role: activeSession.jobTitle,
-          company: activeSession.company,
-          style: activeSession.interviewStyle,
-          question: dynamicNextQ,
-          conversationSummary: conversationStateRef.current.conversationSummary,
+        // Update turn history
+        const conversationTurn: ConversationTurn = {
+          role: 'candidate',
+          text: answerText,
+          timestamp: new Date().toISOString(),
+          questionId: currentQ.id,
+          isFollowUp: currentQ.type === 'follow_up',
+        };
+        conversationStateRef.current.recentTurns.push(conversationTurn);
+        conversationStateRef.current.conversationSummary += `\nCandidate on Q (${currentQ.category}): ${answerText.slice(0, 140)}...`;
+
+        const updatedAnswers = {
+          ...(activeSession.answers || {}),
+          [updatedTurn.questionId]: {
+            questionId: updatedTurn.questionId,
+            answerText,
+            durationSeconds: durationSecs,
+            inputMode,
+            submittedAt: new Date().toISOString(),
+            transcript: inputMode === 'voice' ? answerText : undefined,
+          }
+        };
+
+        const updatedFeedbacks = {
+          ...(activeSession.feedbacks || {}),
+          [updatedTurn.questionId]: feedbackResult,
+        };
+
+        let updatedCompetencyMap = activeSession.competencyMap || {};
+        const isJdProvided = Boolean(
+          setupDraft.jobDescriptionProvided &&
+          setupDraft.jdEvidenceModel &&
+          (setupDraft.jdEvidenceModel.requiredSkills?.length ||
+            setupDraft.jdEvidenceModel.technicalRequirements?.length ||
+            setupDraft.jdEvidenceModel.responsibilities?.length)
+        );
+
+        const contract = activeSession.interviewContract || buildInterviewContract(
+          activeSession.id,
+          (activeSession.durationMinutes || 20) * 60,
+          setupDraft.lockedCandidateContext,
+          isJdProvided ? setupDraft.jdEvidenceModel : null,
+          isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+        );
+
+        const targetCompName = currentQ.targetCompetency || currentQ.category;
+        if (targetCompName && updatedCompetencyMap[targetCompName]) {
+          const updatedState = updateCompetencyState(
+            updatedCompetencyMap[targetCompName],
+            feedbackResult,
+            activeSession.currentObjective || {} as any,
+            answerText
+          );
+          updatedCompetencyMap = {
+            ...updatedCompetencyMap,
+            [targetCompName]: updatedState,
+          };
+        }
+
+        const scores = [...consecutiveScoresRef.current, feedbackResult.overallScore];
+        consecutiveScoresRef.current = scores;
+
+        const currentObjective = activeSession.currentObjective;
+        const closingTurnCompleted = currentObjective?.questionType === 'closing';
+
+        const completionCheck = shouldCompleteInterview({
+          remainingSeconds,
+          currentObjective,
+          contract,
+          competencyMap: updatedCompetencyMap,
+          questionsAskedCount: activeSession.questions?.length || 0,
+          closingTurnCompleted
         });
 
-        setInterviewerSpokenText(bridgeRemark);
-        await provider.speak(bridgeRemark);
-        await provider.startListening();
-        setEngineState('listening');
-      }
+        if (completionCheck.shouldComplete) {
+          setEngineState('completing');
+          const completedTurn: ActiveInterviewTurn = {
+            ...updatedTurn,
+            status: 'completed',
+            submissionCompleted: true,
+          };
+          const completedSession: InterviewSession = {
+            ...activeSession,
+            status: 'completed' as const,
+            sessionStatus: 'completed' as const,
+            turnState: 'completed' as const,
+            completedAt: new Date().toISOString(),
+            completionReason: completionCheck.reason,
+            competencyMap: updatedCompetencyMap,
+            answers: updatedAnswers,
+            feedbacks: updatedFeedbacks,
+            activeTurn: completedTurn,
+          };
+          setActiveSession(completedSession);
+          storage.set('current_session', completedSession);
 
-      return true;
-    } finally {
-      setIsPreparingNextQuestion(false);
-    }
+          if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+            await interviewService.updateSessionProgress(user.id, activeSession.id, activeSession.currentQuestionIndex, 'completed', 0);
+          }
+
+          return { status: 'completed' as const, feedback: feedbackResult };
+        }
+
+        // Continuing: Generate next question
+        setEngineState('follow_up');
+        const nextIndex = activeSession.currentQuestionIndex + 1;
+
+        const brainDecision = interviewBrain.selectNextObjective(
+          contract,
+          updatedCompetencyMap,
+          feedbackResult,
+          conversationStateRef.current.recentTurns,
+          remainingSeconds,
+          scores,
+          setupDraft.lockedCandidateContext
+        );
+
+        const nextObjective = brainDecision.nextObjective;
+
+        // Generate dynamic next question
+        let dynamicNextQ = await aiService.generateAdaptiveQuestion({
+          objective: nextObjective,
+          previousQuestionText: currentQ.text,
+          candidateAnswerText: answerText,
+          role: activeSession.jobTitle,
+          companyName: activeSession.company,
+          isFollowUp: nextObjective.isFollowUp,
+          style: activeSession.interviewStyle,
+          existingQuestions: activeSession.questions || [],
+          lockedContext: setupDraft.lockedCandidateContext,
+          jdEvidenceModel: isJdProvided ? setupDraft.jdEvidenceModel : null,
+        });
+
+        // Question Persistence Contract
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_') && !activeSession.id.startsWith('sess_')) {
+          try {
+            dynamicNextQ = await interviewService.insertAdaptiveQuestion(
+              activeSession.id,
+              dynamicNextQ,
+              nextIndex + 1
+            );
+          } catch (dbErr) {
+            console.error('Error inserting adaptive question to DB:', dbErr);
+            throw new Error(`Failed to persist question: ${dbErr}`);
+          }
+        }
+
+        // Assert valid UUID on persisted question ID
+        if (!uuidRegex.test(dynamicNextQ.id)) {
+          throw new Error(`PersistenceContractError: Question ID "${dynamicNextQ.id}" is not a valid UUID.`);
+        }
+
+        const nextSessionStatus = nextObjective.questionType === 'closing' ? 'closing' as const : 'active' as const;
+        const updatedQuestions = [...(activeSession.questions || []), dynamicNextQ];
+
+        // Create the next active turn
+        const nextTurnId = `turn_${Date.now()}_${nextIndex}`;
+        const nextTurn: ActiveInterviewTurn = {
+          turnId: nextTurnId,
+          questionId: dynamicNextQ.id,
+          sequenceNumber: nextIndex + 1,
+          questionText: dynamicNextQ.text,
+          status: activeSession.mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
+          submissionStarted: false,
+          submissionCompleted: false,
+          createdAt: new Date().toISOString(),
+        };
+
+        const updatedSession: InterviewSession = {
+          ...activeSession,
+          questions: updatedQuestions,
+          currentQuestionIndex: nextIndex,
+          currentQuestionId: dynamicNextQ.id,
+          currentObjective: nextObjective,
+          competencyMap: updatedCompetencyMap,
+          interviewContract: contract,
+          sessionStatus: nextSessionStatus,
+          turnState: activeSession.mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
+          answers: updatedAnswers,
+          feedbacks: updatedFeedbacks,
+          activeTurnId: nextTurnId,
+          activeTurn: nextTurn,
+        };
+
+        setActiveSession(updatedSession);
+        storage.set('current_session', updatedSession);
+        setLiveTranscript('');
+
+        if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
+        }
+
+        // Voice mode TTS playback
+        if (activeSession.mode === 'voice') {
+          const provider = voiceManager.getVoiceProvider();
+          provider.stopListening();
+          setEngineState('asking');
+
+          const bridgeRemark = await aiService.generateInterviewerRemark({
+            action: nextObjective.isFollowUp ? 'ask_question' : 'transition',
+            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+            role: activeSession.jobTitle,
+            company: activeSession.company,
+            style: activeSession.interviewStyle,
+            question: dynamicNextQ,
+            conversationSummary: conversationStateRef.current.conversationSummary,
+          });
+
+          setInterviewerSpokenText(bridgeRemark);
+          await provider.speak(bridgeRemark);
+
+          setEngineState('listening');
+          const finalListeningTurn = {
+            ...nextTurn,
+            status: 'candidate_listening' as const,
+          };
+          const listeningSession = {
+            ...updatedSession,
+            turnState: 'candidate_listening' as const,
+            activeTurn: finalListeningTurn,
+          };
+          setActiveSession(listeningSession);
+          storage.set('current_session', listeningSession);
+        }
+
+        return { status: 'in_progress' as const, feedback: feedbackResult };
+      } catch (err: any) {
+        console.error('Error during submitCurrentTurn execution:', err);
+        const failedTurn: ActiveInterviewTurn = {
+          ...updatedTurn,
+          status: 'failed',
+        };
+        setActiveSession((prev) => ({ ...prev, activeTurn: failedTurn }));
+        setEngineState('ready');
+        throw err;
+      } finally {
+        setIsEvaluating(false);
+        delete inFlightSubmissionsRef.current[turnId];
+      }
+    })();
+
+    inFlightSubmissionsRef.current[turnId] = submissionPromise;
+    return submissionPromise;
   };
 
 
@@ -1128,6 +1314,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const completingSession: InterviewSession = {
       ...activeSession,
       status: 'completing',
+      sessionStatus: 'completed' as const,
+      turnState: 'completed' as const,
       remainingTime: 0,
       currentQuestionIndex: activeSession.questions?.length || activeSession.currentQuestionIndex,
     };
@@ -1250,7 +1438,6 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         finalReport,
         setFinalReport,
         isEvaluating,
-        isPreparingNextQuestion,
         isInterrupted,
         timerSeconds,
         remainingSeconds,
@@ -1262,8 +1449,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         startVoiceSession,
         stopVoiceSession,
         switchToTextMode,
-        submitCandidateAnswer,
-        advanceToNextQuestion,
+        submitCurrentTurn,
         completeInterviewSession,
         getReport,
         terminateActiveSession,

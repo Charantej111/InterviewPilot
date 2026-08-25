@@ -25,15 +25,29 @@ const getClientApiKey = (): string | undefined => {
   return undefined;
 };
 
-async function getEdgeErrorMessage(error: any): Promise<string> {
+function shouldBypassEdgeFunctions(): boolean {
+  try {
+    return import.meta.env.VITE_USE_CLIENT_AI === 'true';
+  } catch {
+    return false;
+  }
+}
+
+async function getEdgeErrorMessage(error: any, functionName?: string): Promise<string> {
   if (!error) return 'Unknown error';
+  const name = error.name || 'Error';
+  const status = error.status || error.context?.status || 'N/A';
+  let details = '';
   try {
     if (error.context && typeof error.context.json === 'function') {
       const body = await error.context.json();
-      if (body?.error) return typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+      details = body?.error ? (typeof body.error === 'string' ? body.error : JSON.stringify(body.error)) : '';
+    } else if (error.context && typeof error.context.text === 'function') {
+      details = await error.context.text();
     }
   } catch (_) {}
-  return error.message || String(error);
+  const message = error.message || String(error);
+  return `[EdgeFunctionError] Function: ${functionName || 'unknown'} | Status: ${status} | Name: ${name} | Msg: ${message}${details ? ` | Details: ${details}` : ''}`;
 }
 
 export const aiService = {
@@ -367,28 +381,30 @@ ${structuredBlocksText}
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('analyze-resume', {
-        body: { fileName, fileText: rawContent, fileBase64, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('analyze-resume', {
+          body: { fileName, fileText: rawContent, fileBase64, apiKey },
+        });
 
-      if (!error && data?.candidateProfile) {
-        const profile = data.candidateProfile;
-        if (profile.isValidResume === false) {
-          throw new Error(profile.invalidReason || `Uploaded document "${fileName}" is not a valid candidate resume (e.g. ticket, invoice, or non-CV file). Please upload a valid resume PDF or Word document.`);
+        if (!error && data?.candidateProfile) {
+          const profile = data.candidateProfile;
+          if (profile.isValidResume === false) {
+            throw new Error(profile.invalidReason || `Uploaded document "${fileName}" is not a valid candidate resume (e.g. ticket, invoice, or non-CV file). Please upload a valid resume PDF or Word document.`);
+          }
+          return profile;
         }
-        return profile;
+        const errDetail = await getEdgeErrorMessage(error, 'analyze-resume');
+        if (errDetail?.includes('not a valid candidate resume')) {
+          throw new Error(errDetail);
+        }
+        console.warn('Supabase analyze-resume Edge Function warning, cascading to client AI engine:', errDetail);
+      } catch (edgeErr: any) {
+        if (edgeErr?.message?.includes('not a valid candidate resume')) {
+          throw edgeErr;
+        }
+        console.warn('Supabase analyze-resume invocation failed, cascading to client AI engine:', edgeErr);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      if (errDetail?.includes('not a valid candidate resume')) {
-        throw new Error(errDetail);
-      }
-      console.warn('Supabase analyze-resume Edge Function warning, cascading to client AI engine:', errDetail);
-    } catch (edgeErr: any) {
-      if (edgeErr?.message?.includes('not a valid candidate resume')) {
-        throw edgeErr;
-      }
-      console.warn('Supabase analyze-resume invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     // 2. Client Gemini Fallback Cascade
@@ -496,19 +512,21 @@ Return JSON strictly matching this schema:
     let rawModel: any = null;
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('analyze-jd', {
-        body: { title: cleanTitle, company: cleanCompany, rawText: cleanText, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('analyze-jd', {
+          body: { title: cleanTitle, company: cleanCompany, rawText: cleanText, apiKey },
+        });
 
-      if (!error && (data?.jdEvidenceModel || data?.jobProfile)) {
-        rawModel = data.jdEvidenceModel || data.jobProfile;
-      } else {
-        const errDetail = await getEdgeErrorMessage(error);
-        console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
+        if (!error && (data?.jdEvidenceModel || data?.jobProfile)) {
+          rawModel = data.jdEvidenceModel || data.jobProfile;
+        } else {
+          const errDetail = await getEdgeErrorMessage(error, 'analyze-jd');
+          console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
+        }
+      } catch (edgeErr) {
+        console.warn('Supabase analyze-jd invocation failed, cascading to client AI engine:', edgeErr);
       }
-    } catch (edgeErr) {
-      console.warn('Supabase analyze-jd invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     // 2. Client Gemini Fallback Cascade
@@ -579,18 +597,20 @@ Return ONLY valid JSON matching this schema:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('research-company', {
-        body: { companyName: cleanCompany, role: cleanRole, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('research-company', {
+          body: { companyName: cleanCompany, role: cleanRole, apiKey },
+        });
 
-      if (!error && data?.companyResearch) {
-        return data.companyResearch;
+        if (!error && data?.companyResearch) {
+          return data.companyResearch;
+        }
+        const errDetail = await getEdgeErrorMessage(error, 'research-company');
+        console.warn('Supabase research-company Edge Function warning, cascading to client AI engine:', errDetail);
+      } catch (edgeErr) {
+        console.warn('Supabase research-company invocation failed, cascading to client AI engine:', edgeErr);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase research-company Edge Function warning, cascading to client AI engine:', errDetail);
-    } catch (edgeErr) {
-      console.warn('Supabase research-company invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     // 2. Client Gemini Fallback Cascade
@@ -690,18 +710,20 @@ Return JSON strictly matching this schema:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('match-analysis', {
-        body: { candidateProfile, jobProfile, companyResearch },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('match-analysis', {
+          body: { candidateProfile, jobProfile, companyResearch },
+        });
 
-      if (!error && data?.matchResult) {
-        return data.matchResult;
+        if (!error && data?.matchResult) {
+          return data.matchResult;
+        }
+        const errDetail = await getEdgeErrorMessage(error, 'match-analysis');
+        console.warn('Supabase match-analysis Edge Function warning, evaluating with client AI engine:', errDetail);
+      } catch (edgeErr) {
+        console.warn('Supabase match-analysis invocation failed, evaluating with client AI engine:', edgeErr);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase match-analysis Edge Function warning, evaluating with client AI engine:', errDetail);
-    } catch (edgeErr) {
-      console.warn('Supabase match-analysis invocation failed, evaluating with client AI engine:', edgeErr);
     }
 
     // 2. Client Gemini Semantic Match Analysis
@@ -794,18 +816,20 @@ Return JSON strictly matching this schema:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('prepare-interview', {
-        body: { ...params, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('prepare-interview', {
+          body: { ...params, apiKey },
+        });
 
-      if (!error && data?.questions && data.questions.length > 0) {
-        return data.questions;
+        if (!error && data?.questions && data.questions.length > 0) {
+          return data.questions;
+        }
+        const errDetail = await getEdgeErrorMessage(error, 'prepare-interview');
+        console.warn('Supabase prepare-interview Edge Function warning, cascading to client AI engine:', errDetail);
+      } catch (edgeErr) {
+        console.warn('Supabase prepare-interview invocation failed, cascading to client AI engine:', edgeErr);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase prepare-interview Edge Function warning, cascading to client AI engine:', errDetail);
-    } catch (edgeErr) {
-      console.warn('Supabase prepare-interview invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     const { resume, job, company, match, settings } = params;
@@ -1176,15 +1200,17 @@ Return JSON strictly matching this schema:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('interview-chat', {
-        body: { ...params, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('interview-chat', {
+          body: { ...params, apiKey },
+        });
 
-      if (!error && data?.spokenText) {
-        return data.spokenText;
-      }
-    } catch (_) {}
+        if (!error && data?.spokenText) {
+          return data.spokenText;
+        }
+      } catch (_) {}
+    }
 
     // 2. Client Gemini Fallback
     try {
@@ -1241,18 +1267,20 @@ Rules:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('evaluate-answer', {
-        body: { ...params, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('evaluate-answer', {
+          body: { ...params, apiKey },
+        });
 
-      if (!error && data?.feedback) {
-        return data.feedback;
+        if (!error && data?.feedback) {
+          return data.feedback;
+        }
+        const errDetail = await getEdgeErrorMessage(error, 'evaluate-answer');
+        console.warn('Supabase evaluate-answer Edge Function warning, cascading to client AI engine:', errDetail);
+      } catch (edgeErr) {
+        console.warn('Supabase evaluate-answer invocation failed, cascading to client AI engine:', edgeErr);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase evaluate-answer Edge Function warning, cascading to client AI engine:', errDetail);
-    } catch (edgeErr) {
-      console.warn('Supabase evaluate-answer invocation failed, cascading to client AI engine:', edgeErr);
     }
 
     const { question, answerText, role, company, difficulty, remainingMinutes } = params;
@@ -1464,15 +1492,17 @@ Generate only the spoken interviewer response text:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('adaptive-followup', {
-        body: { ...params, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('adaptive-followup', {
+          body: { ...params, apiKey },
+        });
 
-      if (!error && data?.followUpQuestion) {
-        return data.followUpQuestion;
-      }
-    } catch (_) {}
+        if (!error && data?.followUpQuestion) {
+          return data.followUpQuestion;
+        }
+      } catch (_) {}
+    }
 
     const { parentQuestion, candidateAnswer, weaknessIdentified, triggerReason, role, company, difficulty, order } = params;
 
@@ -1578,18 +1608,20 @@ Return JSON strictly matching this schema:
     const apiKey = getClientApiKey();
 
     // 1. Try Supabase Edge Function
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-report', {
-        body: { ...params, apiKey },
-      });
+    if (!shouldBypassEdgeFunctions()) {
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-report', {
+          body: { ...params, apiKey },
+        });
 
-      if (!error && data?.report) {
-        return data.report;
+        if (!error && data?.report) {
+          return data.report;
+        }
+        const errDetail = await getEdgeErrorMessage(error, 'generate-report');
+        console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
+      } catch (edgeErr) {
+        console.info('[aiService] Edge Function unavailable, proceeding with calibrated engine.');
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
-    } catch (edgeErr) {
-      console.info('[aiService] Edge Function unavailable, proceeding with calibrated engine.');
     }
 
     const { interviewId, role, company, questions, answers, evaluations } = params;

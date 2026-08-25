@@ -4,6 +4,8 @@ import { runInterviewIntegrityAndVoiceTests } from './interviewIntegrityAndVoice
 import { runInterviewBrainTests } from './interviewBrain.test';
 import { runAnswerIntelligenceTests } from './answerIntelligence.test';
 import { runStructuralParsingTests } from './resumeStructure.test';
+import { runInterviewLifecycleTests } from './interviewLifecycle.test';
+import { runVoiceConversationTests } from './voiceConversation.test';
 
 console.log('====================================================');
 console.log('  RUNNING INTERVIEWPILOT ENGINE REGRESSION TEST SUITE  ');
@@ -32,8 +34,30 @@ const brainResults = runInterviewBrainTests();
 console.log('\n--- 6. Testing Phase 4: Answer Intelligence & Deterministic Scoring Engine ---');
 const answerIntelligenceCount = runAnswerIntelligenceTests();
 
-const totalPassed = aiPipelineResults.passed + resumeResults.passed + structuralResults.passed + voiceIntegrityResults.passed + brainResults.passed + answerIntelligenceCount;
-const totalFailed = aiPipelineResults.failed + resumeResults.failed + structuralResults.failed + voiceIntegrityResults.failed + brainResults.failed;
+console.log('\n--- 7. Testing New Phase 5 Lifecycle State Machine & Boundaries ---');
+const lifecycleResults = runInterviewLifecycleTests();
+
+console.log('\n--- 8. Testing New Phase 5 Voice Safety & Transcript Reducers ---');
+const voiceConvResults = runVoiceConversationTests();
+
+const totalPassed = 
+  aiPipelineResults.passed + 
+  resumeResults.passed + 
+  structuralResults.passed + 
+  voiceIntegrityResults.passed + 
+  brainResults.passed + 
+  answerIntelligenceCount +
+  lifecycleResults.passed +
+  voiceConvResults.passed;
+
+const totalFailed = 
+  aiPipelineResults.failed + 
+  resumeResults.failed + 
+  structuralResults.failed + 
+  voiceIntegrityResults.failed + 
+  brainResults.failed +
+  lifecycleResults.failed +
+  voiceConvResults.failed;
 
 console.log('\n====================================================');
 console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);

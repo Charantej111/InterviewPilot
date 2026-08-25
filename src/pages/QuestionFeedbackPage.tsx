@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 import { Button } from '../components/ui/Button';
@@ -8,8 +8,22 @@ import { useInterview } from '../context/InterviewContext';
 export const QuestionFeedbackPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { activeSession, latestFeedback, advanceToNextQuestion } = useInterview();
-  const [isAdvancing, setIsAdvancing] = useState(false);
+  const { activeSession, latestFeedback } = useInterview();
+
+  React.useEffect(() => {
+    if (activeSession && activeSession.id === id) {
+      const isCompleted =
+        activeSession.status === 'completed' ||
+        activeSession.status === 'report_generating' ||
+        activeSession.status === 'report_ready' ||
+        activeSession.status === 'report_failed';
+
+      if (!isCompleted) {
+        console.warn('[InterviewIntegrity] Blocked premature feedback navigation');
+        navigate(`/interview/${id}`, { replace: true });
+      }
+    }
+  }, [id, activeSession?.status, navigate]);
 
   const fb = latestFeedback || {
     questionId: activeSession.questions[activeSession.currentQuestionIndex]?.id || 'q_01',
@@ -50,17 +64,7 @@ export const QuestionFeedbackPage: React.FC = () => {
   const totalQNum = activeSession.questions.length;
 
   const handleContinue = async () => {
-    setIsAdvancing(true);
-    try {
-      const hasMore = await advanceToNextQuestion();
-      if (hasMore) {
-        navigate(`/interview/${id || activeSession.id}`);
-      } else {
-        navigate(`/interview/${id || activeSession.id}/report`);
-      }
-    } finally {
-      setIsAdvancing(false);
-    }
+    navigate(`/interview/${id || activeSession.id}/report`);
   };
 
   return (
@@ -152,7 +156,6 @@ export const QuestionFeedbackPage: React.FC = () => {
               variant="glass-primary"
               size="md"
               onClick={handleContinue}
-              isLoading={isAdvancing}
               className="w-full sm:w-auto shadow-md"
               rightIcon={<ArrowRight size={15} />}
             >

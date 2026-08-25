@@ -466,38 +466,40 @@ export const interviewService = {
     const { userId, interviewId, finalAnswer, idempotencyKey, isTimeout } = params;
 
     // 1. Try Supabase complete-interview Edge Function
-    try {
-      let apiKey = '';
+    if (import.meta.env.VITE_USE_CLIENT_AI !== 'true') {
       try {
-        apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '';
-      } catch {}
-
-      if (!apiKey) {
+        let apiKey = '';
         try {
-          if (typeof process !== 'undefined' && process?.env) {
-            apiKey = process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '';
-          }
+          apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '';
         } catch {}
-      }
-      const { data, error } = await supabase.functions.invoke('complete-interview', {
-        body: {
-          interviewId,
-          finalAnswer,
-          idempotencyKey: idempotencyKey || crypto.randomUUID(),
-          isTimeout: isTimeout || false,
-          apiKey,
-        },
-      });
 
-      if (!error && data?.report) {
-        return { status: 'report_ready', report: data.report };
+        if (!apiKey) {
+          try {
+            if (typeof process !== 'undefined' && process?.env) {
+              apiKey = process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '';
+            }
+          } catch {}
+        }
+        const { data, error } = await supabase.functions.invoke('complete-interview', {
+          body: {
+            interviewId,
+            finalAnswer,
+            idempotencyKey: idempotencyKey || crypto.randomUUID(),
+            isTimeout: isTimeout || false,
+            apiKey,
+          },
+        });
+
+        if (!error && data?.report) {
+          return { status: 'report_ready', report: data.report };
+        }
+        if (!error && data?.status) {
+          return { status: data.status, report: data.report };
+        }
+        console.warn('complete-interview Edge Function notice, using client fallback:', error);
+      } catch (edgeErr) {
+        console.warn('complete-interview Edge Function invocation error, using client fallback:', edgeErr);
       }
-      if (!error && data?.status) {
-        return { status: data.status, report: data.report };
-      }
-      console.warn('complete-interview Edge Function notice, using client fallback:', error);
-    } catch (edgeErr) {
-      console.warn('complete-interview Edge Function invocation error, using client fallback:', edgeErr);
     }
 
     // 2. Client-side authoritative fallback pipeline

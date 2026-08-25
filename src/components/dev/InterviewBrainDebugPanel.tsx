@@ -9,6 +9,10 @@ export const InterviewBrainDebugPanel: React.FC = () => {
     activeSession,
     remainingSeconds,
     latestFeedback,
+    engineState,
+    voiceStatus,
+    liveTranscript,
+    interviewerSpokenText,
   } = useInterview();
 
   const isDebugActive =
@@ -21,6 +25,16 @@ export const InterviewBrainDebugPanel: React.FC = () => {
   const competencyMap = activeSession.competencyMap || {};
   const currentObj = activeSession.currentObjective;
   const currentQ = activeSession.questions?.[activeSession.currentQuestionIndex];
+
+  // Route telemetry
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isCompletedSession =
+    activeSession.status === 'completed' ||
+    activeSession.status === 'report_generating' ||
+    activeSession.status === 'report_ready' ||
+    activeSession.status === 'report_failed';
+  const expectedPath = isCompletedSession ? `/interview/${activeSession.id}/report` : `/interview/${activeSession.id}`;
+  const feedbackAllowed = isCompletedSession;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-lg w-full bg-zinc-950/95 text-zinc-200 border border-zinc-700 rounded-2xl shadow-2xl backdrop-blur-md text-xs font-mono">
@@ -51,21 +65,53 @@ export const InterviewBrainDebugPanel: React.FC = () => {
           {/* 1. CURRENT SESSION & CONTRACT */}
           <div className="space-y-1 pb-2 border-b border-zinc-800/80">
             <div className="flex items-center justify-between text-[10px] uppercase font-bold text-zinc-500">
-              <span>1. Session & Contract Budget</span>
+              <span>1. Session & Lifecycle</span>
               <span>Questions: {activeSession.questions?.length || 1} (Bound: {contract?.minQuestions || 5}..{contract?.maxQuestions || 15})</span>
             </div>
             <div className="grid grid-cols-2 gap-1 text-[11px] pt-0.5">
               <div>
-                Mode: <span className="text-emerald-300 font-bold">{contract?.mode || 'resume_grounded'}</span>
+                Session ID: <span className="text-zinc-400 text-[10px]">{activeSession.id.slice(0, 12)}...</span>
+              </div>
+              <div>
+                Turn ID: <span className="text-zinc-400 text-[10px]">{activeSession.activeTurnId ? activeSession.activeTurnId.slice(0, 12) : 'NONE'}</span>
+              </div>
+              <div>
+                Status: <span className="text-blue-300 font-bold">{activeSession.status}</span>
+              </div>
+              <div>
+                Session Status: <span className="text-cyan-300 font-bold">{activeSession.sessionStatus || 'not_started'}</span>
+              </div>
+              <div>
+                Turn State: <span className="text-purple-300 font-bold">{activeSession.turnState || 'idle'}</span>
               </div>
               <div>
                 Time Remaining: <span className="text-amber-300 font-mono font-bold">{formatTime(remainingSeconds)}</span>
               </div>
               <div>
-                Target Role: <span className="text-zinc-300 truncate">{activeSession.jobTitle}</span>
+                Expected Route: <span className="text-zinc-400">{expectedPath}</span>
               </div>
               <div>
-                Follow-ups Left: <span className="text-blue-300 font-bold">{contract?.maxFollowUpsPerTopic || 2} max / topic</span>
+                Current Route: <span className="text-zinc-400">{currentPath}</span>
+              </div>
+              <div>
+                Feedback Allowed: <span className={feedbackAllowed ? 'text-emerald-400 font-bold' : 'text-rose-400'}>{feedbackAllowed ? 'YES' : 'NO'}</span>
+              </div>
+              <div>
+                Completion Reason: <span className="text-amber-400 font-bold">{activeSession.completionReason || 'NONE'}</span>
+              </div>
+            </div>
+            <div className="pt-1.5 text-[10px] border-t border-zinc-900">
+              <span className="text-zinc-500 font-bold">Why did the session end?</span>
+              <div className="text-zinc-300 mt-0.5 bg-zinc-900/60 p-1.5 rounded-lg">
+                {activeSession.status === 'completed' || isCompletedSession ? (
+                  <span>
+                    Completed: true | Reason: {activeSession.completionReason || 'UNKNOWN'} | Action: REDIRECT_TO_REPORT
+                  </span>
+                ) : (
+                  <span>
+                    Completed: false | Reason: NONE | Next Action: GENERATE_NEXT_QUESTION (Score count: {activeSession.questions?.length})
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -111,6 +157,48 @@ export const InterviewBrainDebugPanel: React.FC = () => {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* 2a. VOICE & AUDIO TELEMETRY */}
+          <div className="space-y-1 pb-2 border-b border-zinc-800/80">
+            <span className="text-[10px] font-bold uppercase text-zinc-500 flex items-center gap-1">
+              <Brain size={11} className="text-purple-400" />
+              <span>2a. Voice & Audio Telemetry</span>
+            </span>
+            <div className="space-y-1 text-[11px] bg-zinc-900/90 p-2.5 rounded-xl border border-zinc-800">
+              <div className="flex justify-between">
+                <span className="text-zinc-400">Voice Status:</span>
+                <span className="text-purple-300 font-bold">{voiceStatus}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-400">Engine State:</span>
+                <span className="text-cyan-300 font-semibold uppercase">{engineState}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-400">TTS Active:</span>
+                <span className={activeSession.turnState === 'interviewer_speaking' ? 'text-emerald-400 font-bold' : 'text-zinc-400'}>
+                  {activeSession.turnState === 'interviewer_speaking' ? 'ACTIVE (Mic Muted)' : 'INACTIVE'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-zinc-400">Mic Listening:</span>
+                <span className={activeSession.turnState === 'candidate_listening' || activeSession.turnState === 'candidate_speaking' ? 'text-emerald-400 font-bold' : 'text-zinc-400'}>
+                  {activeSession.turnState === 'candidate_listening' || activeSession.turnState === 'candidate_speaking' ? 'ACTIVE (Mic Open)' : 'INACTIVE'}
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-400 block">Live Transcript:</span>
+                <div className="text-[10px] text-zinc-300 bg-zinc-950 p-1.5 rounded border border-zinc-800 min-h-[24px] break-words">
+                  {liveTranscript || 'No speech activity...'}
+                </div>
+              </div>
+              <div>
+                <span className="text-zinc-400 block">AI TTS Spoken:</span>
+                <div className="text-[10px] text-zinc-400 bg-zinc-950 p-1.5 rounded border border-zinc-800 max-h-16 overflow-y-auto break-words">
+                  {interviewerSpokenText || 'No AI speech...'}
+                </div>
+              </div>
             </div>
           </div>
 

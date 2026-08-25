@@ -77,3 +77,18 @@ export interface VoiceProvider {
   
   sendContext(contextSummary: string): void;
 }
+
+export interface VoiceSessionController {
+  startInterviewerSpeech(text: string): Promise<void>;
+  stopInterviewerSpeech(): void;
+
+  startCandidateListening(): Promise<void>;
+  stopCandidateListening(): void;
+
+  pauseRecognition(): void;
+  resumeRecognition(): void;
+
+  finishCandidateTurn(): Promise<void>;
+
+  cleanup(): void;
+}

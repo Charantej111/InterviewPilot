@@ -7,7 +7,7 @@ import { QuestionBlock } from '../components/interview/QuestionBlock';
 import { AnswerInput } from '../components/interview/AnswerInput';
 import { InterviewCompletionScreen } from '../components/interview/InterviewCompletionScreen';
 import { ExitConfirmModal } from '../components/interview/ExitConfirmModal';
-import { AlertTriangle, ArrowRight, Clock, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock, ShieldAlert, Sparkles } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { InterviewBrainDebugPanel } from '../components/dev/InterviewBrainDebugPanel';
 
@@ -17,8 +17,7 @@ export const InterviewRoomPage: React.FC = () => {
   const {
     activeSession,
     loadSession,
-    submitCandidateAnswer,
-    advanceToNextQuestion,
+    submitCurrentTurn,
     completeInterviewSession,
     getReport,
     remainingSeconds,
@@ -129,37 +128,12 @@ export const InterviewRoomPage: React.FC = () => {
     inputMode: 'text' | 'voice',
     durationSecs: number
   ) => {
-    if (isCompletingRef.current) return;
+    if (isCompletingRef.current || isAdvancing) return;
 
-    const isLastQuestion =
-      (activeSession.currentQuestionIndex || 0) + 1 >= (activeSession.questions?.length || 1) ||
-      remainingSeconds <= 0;
-
-    if (isLastQuestion) {
-      isCompletingRef.current = true;
-      try {
-        const res = await completeInterviewSession({
-          questionId: activeQuestion?.id || `q_${currentQuestionNum}`,
-          answerText,
-          inputMode,
-          durationSeconds: durationSecs,
-        });
-
-        if (res.status === 'report_ready' && res.report) {
-          navigate(`/interview/${targetSessionId}/report`, { replace: true });
-        }
-      } catch (err) {
-        console.error('Error during final completion submission:', err);
-      }
-      return;
-    }
-
-    // Intermediate question submission
     setIsAdvancing(true);
     try {
-      await submitCandidateAnswer(answerText, inputMode, durationSecs);
-      const hasMore = await advanceToNextQuestion();
-      if (!hasMore) {
+      const res = await submitCurrentTurn(answerText, inputMode, durationSecs);
+      if (res.status === 'completed') {
         isCompletingRef.current = true;
         await completeInterviewSession();
         navigate(`/interview/${targetSessionId}/report`, { replace: true });
@@ -263,6 +237,34 @@ export const InterviewRoomPage: React.FC = () => {
             onGoToDashboard={() => navigate('/dashboard')}
             onViewReport={() => navigate(`/interview/${targetSessionId}/report`)}
           />
+        ) : isAdvancing ? (
+          <div className="max-w-2xl mx-auto p-8 sm:p-12 rounded-3xl bg-white dark:bg-zinc-900/90 backdrop-blur-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl text-center space-y-6 animate-fadeIn text-foreground">
+            <div className="w-16 h-16 rounded-3xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto border border-purple-500/20">
+              <Sparkles size={32} className="animate-spin duration-[3000ms]" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold">Analyzing Your Response...</h3>
+              <p className="text-sm text-foreground-muted max-w-md mx-auto leading-relaxed">
+                Our Answer Intelligence engine is extracting evidence signals and updating your competency reliability mapping.
+              </p>
+            </div>
+            
+            {/* Visual Progress Steps */}
+            <div className="max-w-xs mx-auto grid grid-cols-3 gap-2 pt-4">
+              <div className="space-y-1">
+                <div className="h-1 rounded bg-purple-600" />
+                <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold block">1. Submitted</span>
+              </div>
+              <div className="space-y-1">
+                <div className="h-1 rounded bg-purple-600/50 animate-pulse duration-700" />
+                <span className="text-[10px] text-foreground-muted font-bold block">2. Evaluating</span>
+              </div>
+              <div className="space-y-1">
+                <div className="h-1 rounded bg-zinc-200 dark:bg-zinc-800" />
+                <span className="text-[10px] text-foreground-muted font-bold block">3. Next Qn</span>
+              </div>
+            </div>
+          </div>
         ) : (
           <div ref={questionContainerRef} className="space-y-6 animate-fadeIn">
             {/* Timer Expired Banner Alert */}
