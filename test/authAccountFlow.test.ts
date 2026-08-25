@@ -78,12 +78,21 @@ export async function runAuthAccountFlowTests() {
     assert(normalized.userMessage.includes('Too many verification attempts'), 'Must provide clear rate limit advice');
   });
 
-  // 5. Error Normalization: Expired Token
-  test('Scenario 5: Normalizes expired token errors', () => {
+  // 5. Error Normalization: Wrong / Invalid OTP Token vs Expired
+  test('Scenario 5: Normalizes wrong OTP token into clear "Incorrect verification code" message', () => {
     const err = { message: 'Token has expired or is invalid' };
     const normalized = normalizeAuthError(err);
-    assert(normalized.code === 'OTP_EXPIRED' || normalized.code === 'OTP_INVALID', 'Must identify expired/invalid token');
+    assert(normalized.code === 'OTP_INVALID', 'Must identify as OTP_INVALID');
+    assert(
+      normalized.userMessage === 'Incorrect verification code. Please check the 6-digit code and try again.',
+      'Must explain that the code entered was incorrect'
+    );
     assert(!normalized.userMessage.includes('postgres'), 'Must not leak database internals');
+
+    const errExpired = { message: 'Token has expired' };
+    const normExpired = normalizeAuthError(errExpired);
+    assert(normExpired.code === 'OTP_EXPIRED', 'Must identify standalone expired token');
+    assert(normExpired.userMessage.includes('expired'), 'Must state that token expired');
   });
 
   // 6. Error Normalization: Database Constraint / Schema Error

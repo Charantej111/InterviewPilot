@@ -51,10 +51,10 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile>(() => storage.get('user_profile', createDefaultUser()));
-  const [preferences, setPreferences] = useState<UserPreferences>(() => 
+  const [preferences, setPreferences] = useState<UserPreferences>(() =>
     storage.get('user_preferences', defaultPreferences)
   );
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => 
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() =>
     storage.get('is_authenticated', false)
   );
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
@@ -254,9 +254,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
           shouldCreateUser: isSignup,
           data: name
             ? {
-                full_name: name,
-                name: name,
-              }
+              full_name: name,
+              name: name,
+            }
             : undefined,
         },
       });
@@ -392,7 +392,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         await profileService.updateProfile(user.id, updated);
       } catch (err) {
-        console.error('[UserContext] Failed to sync profile to Supabase:', err);
+        console.error('[UserContext] Failed to sync profile', err);
       }
     }
   };

@@ -51,7 +51,23 @@ export function normalizeAuthError(error: any): NormalizedAuthError {
     };
   }
 
-  // 3. Expired or Invalid OTP Token
+  // 3. Invalid or Incorrect OTP Token
+  if (
+    rawMsg.includes('invalid') ||
+    rawMsg.includes('incorrect') ||
+    rawMsg.includes('wrong') ||
+    rawMsg.includes('token is invalid') ||
+    rawMsg.includes('token has expired or is invalid') ||
+    rawMsg.includes('bad_jwt') ||
+    rawMsg.includes('otp_invalid')
+  ) {
+    return {
+      userMessage: 'Incorrect verification code. Please check the 6-digit code and try again.',
+      code: 'OTP_INVALID',
+    };
+  }
+
+  // 4. Specifically Expired OTP Token
   if (
     rawMsg.includes('expired') ||
     rawMsg.includes('timeout') ||
@@ -61,19 +77,6 @@ export function normalizeAuthError(error: any): NormalizedAuthError {
     return {
       userMessage: 'The verification code has expired. Please request a fresh one-time code.',
       code: 'OTP_EXPIRED',
-    };
-  }
-
-  if (
-    rawMsg.includes('invalid') ||
-    rawMsg.includes('incorrect') ||
-    rawMsg.includes('token is invalid') ||
-    rawMsg.includes('bad_jwt') ||
-    rawMsg.includes('otp_invalid')
-  ) {
-    return {
-      userMessage: 'Invalid verification code. Please check the 6-digit code and try again.',
-      code: 'OTP_INVALID',
     };
   }
 
