@@ -99,10 +99,10 @@ export const Navbar: React.FC = () => {
           <ThemeToggle />
           <button
             onClick={() => setOpen(!open)}
-            className="p-1.5 rounded-full text-foreground-muted hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+            className="p-2 rounded-full text-slate-900 dark:text-zinc-100 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-300 dark:border-zinc-700 transition-colors shadow-xs cursor-pointer flex items-center justify-center"
             aria-label="Toggle menu"
           >
-            {open ? <X size={18} /> : <Menu size={18} />}
+            {open ? <X size={18} className="stroke-[2.5]" /> : <Menu size={18} className="stroke-[2.5]" />}
           </button>
         </div>
       </header>

@@ -163,11 +163,11 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           <div className="flex items-center gap-2">
             <ThemeToggle size="sm" />
             <button
-              className="p-1.5 rounded-xl text-foreground-muted hover:text-foreground hover:bg-surface-subtle cursor-pointer"
+              className="p-2 rounded-xl text-slate-900 dark:text-zinc-100 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-300 dark:border-zinc-700 transition-colors shadow-xs cursor-pointer flex items-center justify-center"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle navigation menu"
             >
-              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              {mobileMenuOpen ? <X size={20} className="stroke-[2.5]" /> : <Menu size={20} className="stroke-[2.5]" />}
             </button>
           </div>
         </header>
@@ -192,23 +192,23 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 animate={{ x: 0 }}
                 exit={{ x: '-100%' }}
                 transition={{ type: 'spring', stiffness: 400, damping: 35 }}
-                className="fixed inset-y-0 left-0 z-50 w-72 bg-surface/95 backdrop-blur-2xl border-r border-border/80 p-6 flex flex-col justify-between shadow-2xl md:hidden"
+                className="fixed inset-y-0 left-0 z-50 w-72 bg-white/95 dark:bg-[#11111c]/95 backdrop-blur-2xl border-r border-slate-200 dark:border-white/10 p-6 flex flex-col justify-between shadow-2xl md:hidden"
               >
                 <div>
-                  <div className="flex items-center justify-between pb-6 border-b border-border/80">
+                  <div className="flex items-center justify-between pb-6 border-b border-slate-200 dark:border-white/10">
                     <Link to="/" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-500 to-pink-500 p-[1px]">
                         <div className="w-full h-full rounded-[7px] bg-[#0b0b12] flex items-center justify-center text-[10px] font-bold text-white">
                           IP
                         </div>
                       </div>
-                      <span className="font-extrabold text-base text-foreground">InterviewPilot</span>
+                      <span className="font-extrabold text-base text-slate-900 dark:text-white">InterviewPilot</span>
                     </Link>
                     <button
                       onClick={() => setMobileMenuOpen(false)}
-                      className="p-1.5 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-subtle cursor-pointer"
+                      className="p-2 rounded-xl text-slate-900 dark:text-zinc-100 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-300 dark:border-zinc-700 transition-colors cursor-pointer"
                     >
-                      <X size={18} />
+                      <X size={18} className="stroke-[2.5]" />
                     </button>
                   </div>
 
@@ -235,7 +235,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                               isActive
                                 ? 'bg-primary/10 text-primary border border-primary/30 font-bold shadow-xs'
-                                : 'text-foreground-muted hover:text-foreground hover:bg-surface-subtle'
+                                : 'text-slate-700 dark:text-zinc-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
                             }`}
                           >
                             <div className="flex items-center gap-3">

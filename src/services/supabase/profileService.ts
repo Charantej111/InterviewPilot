@@ -80,6 +80,29 @@ export const profileService = {
       .single();
 
     if (upsertError) {
+      // If the error is foreign key violation (23503), it means userId is not present in auth.users
+      if ((upsertError as any).code === '23503') {
+        console.warn('[profileService] User ID is not present in auth.users (foreign key 23503):', userId);
+        return {
+          profile: {
+            id: userId,
+            name: defaultName,
+            email: authEmail || '',
+            avatarUrl: undefined,
+            targetRole: '',
+            targetCompanies: [],
+            experienceLevel: '' as any,
+            streakDays: 0,
+            lastActiveDate: new Date().toISOString().split('T')[0],
+            interviewsCompleted: 0,
+            averageScore: 0.0,
+            readinessPercentage: 0,
+            readinessDelta: 0,
+          },
+          preferences: defaultPreferences,
+        };
+      }
+
       // In case of race condition where another concurrent worker completed upsert, re-query once
       const { data: retryData, error: retryError } = await supabase
         .from('profiles')
