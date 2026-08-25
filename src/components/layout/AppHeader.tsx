@@ -90,7 +90,7 @@ export const AppHeader: React.FC = () => {
             className="flex items-center gap-2 pl-2 border-l border-border hover:opacity-80 transition-opacity"
             title="Account & Settings"
           >
-            <Avatar name={user.name} size="sm" />
+            <Avatar name={user.name} src={user.avatarUrl} size="sm" />
             <span className="hidden md:inline text-xs font-medium text-foreground">
               {user.name.split(' ')[0]}
             </span>

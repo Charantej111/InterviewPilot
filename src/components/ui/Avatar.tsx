@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { cn } from '../../lib/utils';
 import { Sparkles } from 'lucide-react';
+import { Emoji } from 'react-apple-emojis';
 
 export interface AvatarProps {
   name?: string;
@@ -11,6 +12,17 @@ export interface AvatarProps {
   isLive?: boolean;
   className?: string;
 }
+
+// Helper to determine if src refers to an Apple emoji
+const isAppleEmoji = (str?: string) => {
+  if (!str) return false;
+  if (str.startsWith('apple:')) return true;
+  return /^[a-z0-9-]+$/i.test(str) && !str.startsWith('http') && !str.startsWith('/') && !str.startsWith('data:');
+};
+
+const getAppleEmojiName = (str: string) => {
+  return str.startsWith('apple:') ? str.replace('apple:', '') : str;
+};
 
 // Deterministic harmonious gradient generator for initials
 const getGradientFromName = (name: string) => {
@@ -78,13 +90,39 @@ export const Avatar: React.FC<AvatarProps> = ({
           className
         )}
       >
-        {src && !imageError ? (
+        {src && (src.startsWith('http') || src.startsWith('data:') || src.startsWith('/')) && !imageError ? (
           <img
             src={src}
             alt={name}
             className="w-full h-full object-cover"
             onError={() => setImageError(true)}
           />
+        ) : isAppleEmoji(src) ? (
+          <div className="w-full h-full flex items-center justify-center p-1 sm:p-1.5">
+            <Emoji
+              name={getAppleEmojiName(src!)}
+              className="w-full h-full object-contain select-none drop-shadow-xs"
+              alt={name}
+            />
+          </div>
+        ) : src && src.length <= 8 ? (
+          <span
+            className="select-none leading-none flex items-center justify-center"
+            style={{
+              fontSize:
+                size === '2xl'
+                  ? '2.2rem'
+                  : size === 'xl'
+                  ? '1.75rem'
+                  : size === 'lg'
+                  ? '1.35rem'
+                  : size === 'md'
+                  ? '1.15rem'
+                  : '0.85rem',
+            }}
+          >
+            {src}
+          </span>
         ) : (
           <span className="font-mono tracking-tight font-bold">{initials}</span>
         )}

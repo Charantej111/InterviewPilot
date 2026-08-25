@@ -83,7 +83,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             to="/profile"
             className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors group"
           >
-            <Avatar name={displayName} size="xs" status="online" />
+            <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
             <div className="flex flex-col min-w-0 flex-1">
               <span className="font-bold text-foreground text-xs leading-tight truncate group-hover:text-primary transition-colors">
                 {displayName}
@@ -118,7 +118,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               <span>New Simulation</span>
             </Link>
             <Link to="/profile">
-              <Avatar name={displayName} size="xs" status="online" />
+              <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
             </Link>
           </div>
         </header>
@@ -236,7 +236,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                     onClick={() => setMobileMenuOpen(false)}
                     className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors"
                   >
-                    <Avatar name={displayName} size="xs" status="online" />
+                    <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
                     <div className="flex flex-col min-w-0 flex-1">
                       <span className="font-bold text-xs text-foreground truncate">{displayName}</span>
                       <span className="text-[10px] text-foreground-muted truncate">{user.targetRole || 'Candidate'}</span>

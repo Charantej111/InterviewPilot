@@ -21,6 +21,8 @@ import { ProfilePage } from './pages/ProfilePage';
 
 import { CustomCursor } from './components/ui/CustomCursor';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { EmojiProvider } from 'react-apple-emojis';
+import emojiData from 'react-apple-emojis/src/data.json';
 
 export const CompletionRouteGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { id } = useParams<{ id: string }>();
@@ -44,11 +46,12 @@ export const CompletionRouteGuard: React.FC<{ children: React.ReactNode }> = ({ 
 
 export const App: React.FC = () => {
   return (
-    <ThemeProvider>
-      <UserProvider>
-        <InterviewProvider>
-          <CustomCursor />
-          <BrowserRouter>
+    <EmojiProvider data={emojiData}>
+      <ThemeProvider>
+        <UserProvider>
+          <InterviewProvider>
+            <CustomCursor />
+            <BrowserRouter>
             <Routes>
               {/* Marketing & Auth */}
               <Route path="/" element={<LandingPage />} />
@@ -149,7 +152,8 @@ export const App: React.FC = () => {
         </InterviewProvider>
       </UserProvider>
     </ThemeProvider>
-  );
+  </EmojiProvider>
+);
 };
 
 export default App;
