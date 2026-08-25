@@ -2,6 +2,8 @@ import React from 'react';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { CheckCircle2, Loader2, Circle } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { BoxLoader } from './BoxLoader';
+import { LetterLoader } from './LetterLoader';
 
 export interface LoadingStep {
   label: string;
@@ -12,6 +14,7 @@ export interface AILoaderProps {
   title?: string;
   stage?: string;
   steps?: LoadingStep[];
+  variant?: 'lottie' | 'box' | 'plasma';
   className?: string;
 }
 
@@ -19,6 +22,7 @@ export const AILoader: React.FC<AILoaderProps> = ({
   title = 'Calibrating Simulation Engine',
   stage = 'Analyzing signals & matching requirements...',
   steps,
+  variant = 'lottie',
   className,
 }) => {
   return (
@@ -34,13 +38,21 @@ export const AILoader: React.FC<AILoaderProps> = ({
       <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 rounded-full bg-indigo-500/10 dark:bg-indigo-500/20 blur-3xl pointer-events-none animate-pulse" />
 
       <div className="relative z-10 space-y-5">
-        {/* Professional Lottie Animation */}
-        <div className="w-24 h-24 sm:w-28 sm:h-28 mx-auto flex items-center justify-center">
-          <DotLottieReact
-            src="https://lottie.host/62c7d048-2882-4ac7-bf30-5e33816b4ec4/a2PgmTbjDh.lottie"
-            loop
-            autoplay
-          />
+        {/* Visual Loader Animation */}
+        <div className="mx-auto flex items-center justify-center min-h-[90px]">
+          {variant === 'box' ? (
+            <BoxLoader size="md" />
+          ) : variant === 'plasma' ? (
+            <LetterLoader text="Analyzing" size="sm" />
+          ) : (
+            <div className="w-24 h-24 sm:w-28 sm:h-28 mx-auto flex items-center justify-center">
+              <DotLottieReact
+                src="https://lottie.host/62c7d048-2882-4ac7-bf30-5e33816b4ec4/a2PgmTbjDh.lottie"
+                loop
+                autoplay
+              />
+            </div>
+          )}
         </div>
 
         {/* Title & Stage Details */}

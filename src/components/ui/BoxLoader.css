@@ -1,0 +1,144 @@
+/* 3D Isometric Progressive Flux Box Loader */
+.box-loader-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.boxes {
+  --size: 32px;
+  --duration: 800ms;
+  height: calc(var(--size) * 2);
+  width: calc(var(--size) * 3);
+  position: relative;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  margin-top: calc(var(--size) * 1.5 * -1);
+  transform: rotateX(60deg) rotateZ(45deg) rotateY(0deg) translateZ(0px);
+}
+
+.boxes.boxes-sm {
+  --size: 22px;
+}
+
+.boxes.boxes-md {
+  --size: 32px;
+}
+
+.boxes.boxes-lg {
+  --size: 42px;
+}
+
+.boxes .box {
+  width: var(--size);
+  height: var(--size);
+  top: 0;
+  left: 0;
+  position: absolute;
+  transform-style: preserve-3d;
+}
+
+.boxes .box.box-1 {
+  transform: translate(100%, 0);
+  animation: box-anim-1 var(--duration) linear infinite;
+}
+
+.boxes .box.box-2 {
+  transform: translate(0, 100%);
+  animation: box-anim-2 var(--duration) linear infinite;
+}
+
+.boxes .box.box-3 {
+  transform: translate(100%, 100%);
+  animation: box-anim-3 var(--duration) linear infinite;
+}
+
+.boxes .box.box-4 {
+  transform: translate(200%, 0);
+  animation: box-anim-4 var(--duration) linear infinite;
+}
+
+.boxes .box .face {
+  --background: #6366f1;
+  --top: #818cf8;
+  --bottom: #4f46e5;
+  --left: #c084fc;
+  --right: #a855f7;
+  background: var(--background);
+  top: 0;
+  left: 0;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+.boxes .box .face.face-top {
+  background: var(--top);
+  bottom: 100%;
+  left: 0;
+  position: absolute;
+  transform: rotateX(90deg);
+  transform-origin: 0 100%;
+}
+
+.boxes .box .face.face-right {
+  background: var(--right);
+  left: 100%;
+  top: 0;
+  position: absolute;
+  transform: rotateY(90deg);
+  transform-origin: 0 0;
+}
+
+.boxes .box .face.face-front {
+  background: var(--bottom);
+}
+
+.boxes .box .face.face-back {
+  background: var(--left);
+  transform: rotateY(180deg);
+}
+
+@keyframes box-anim-1 {
+  0%, 50% {
+    transform: translate(100%, 0);
+  }
+  100% {
+    transform: translate(200%, 0);
+  }
+}
+
+@keyframes box-anim-2 {
+  0% {
+    transform: translate(0, 100%);
+  }
+  50% {
+    transform: translate(0, 0);
+  }
+  100% {
+    transform: translate(100%, 0);
+  }
+}
+
+@keyframes box-anim-3 {
+  0%, 50% {
+    transform: translate(100%, 100%);
+  }
+  100% {
+    transform: translate(0, 100%);
+  }
+}
+
+@keyframes box-anim-4 {
+  0% {
+    transform: translate(200%, 0);
+  }
+  50% {
+    transform: translate(200%, 100%);
+  }
+  100% {
+    transform: translate(100%, 100%);
+  }
+}

@@ -17,6 +17,7 @@ import { InterviewRoomPage } from './pages/InterviewRoomPage';
 import { QuestionFeedbackPage } from './pages/QuestionFeedbackPage';
 import { FinalReportPage } from './pages/FinalReportPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ProfilePage } from './pages/ProfilePage';
 
 import { CustomCursor } from './components/ui/CustomCursor';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
@@ -128,7 +129,7 @@ export const App: React.FC = () => {
                 path="/profile"
                 element={
                   <ProtectedRoute>
-                    <SettingsPage />
+                    <ProfilePage />
                   </ProtectedRoute>
                 }
               />

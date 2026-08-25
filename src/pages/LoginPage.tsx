@@ -8,6 +8,7 @@ import GradientWaves from '../components/reactbits/GradientWaves';
 import { ArrowRight, ArrowLeft, Mail, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Logo } from '../components/ui/Logo';
 import { OtpInput } from '../components/auth/OtpInput';
+import { Component as AILoader } from '../components/ui/ai-loader';
 
 export const LoginPage: React.FC = () => {
   const [step, setStep] = useState<'email' | 'otp'>('email');
@@ -16,6 +17,7 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const { requestOtp, verifyOtp, resendOtp, cooldownRemaining, isRequestingOtp } = useUser();
   const navigate = useNavigate();
@@ -62,10 +64,12 @@ export const LoginPage: React.FC = () => {
       const res = await verifyOtp(email, targetCode);
       if (res.error) {
         setErrorMessage(res.error);
+        setIsSubmitting(false);
       } else {
+        setIsLoggingIn(true);
         navigate('/dashboard');
       }
-    } finally {
+    } catch {
       setIsSubmitting(false);
     }
   };
@@ -275,6 +279,13 @@ export const LoginPage: React.FC = () => {
       <footer className="p-6 text-center text-xs text-foreground-subtle relative z-10 font-medium">
         © {new Date().getFullYear()} InterviewPilot, Inc. Passwordless email OTP verification.
       </footer>
+
+      {/* Post-Login Loading Overlay using 21st.dev AI Loader */}
+      {isLoggingIn && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/90 backdrop-blur-2xl">
+          <AILoader text="Authenticating" />
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-/* 3D Atmospheric Glowing AI Plasma Sphere */
+/* 3D Atmospheric Glowing AI Plasma Sphere & Letter Loader */
 .loader-container-center {
   display: flex;
   align-items: center;
@@ -77,7 +77,8 @@
 }
 
 /* Letters with Organic Wave Shimmer Physics */
-.loader-letter-track .loader-letter {
+.loader-letter-track .loader-letter,
+.loader-wrapper .loader-letter {
   display: inline-block;
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
   font-size: 13.5px;
@@ -88,7 +89,21 @@
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
   animation: letterShimmer 1.8s ease-in-out infinite;
   transform-origin: center;
+  z-index: 10;
 }
+
+.loader-wrapper .loader-letter:nth-child(1) { animation-delay: 0.08s; }
+.loader-wrapper .loader-letter:nth-child(2) { animation-delay: 0.16s; }
+.loader-wrapper .loader-letter:nth-child(3) { animation-delay: 0.24s; }
+.loader-wrapper .loader-letter:nth-child(4) { animation-delay: 0.32s; }
+.loader-wrapper .loader-letter:nth-child(5) { animation-delay: 0.40s; }
+.loader-wrapper .loader-letter:nth-child(6) { animation-delay: 0.48s; }
+.loader-wrapper .loader-letter:nth-child(7) { animation-delay: 0.56s; }
+.loader-wrapper .loader-letter:nth-child(8) { animation-delay: 0.64s; }
+.loader-wrapper .loader-letter:nth-child(9) { animation-delay: 0.72s; }
+.loader-wrapper .loader-letter:nth-child(10) { animation-delay: 0.80s; }
+.loader-wrapper .loader-letter:nth-child(11) { animation-delay: 0.88s; }
+.loader-wrapper .loader-letter:nth-child(12) { animation-delay: 0.96s; }
 
 @keyframes letterShimmer {
   0%, 100% {

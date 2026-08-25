@@ -8,7 +8,8 @@ import {
   Settings as SettingsIcon, 
   Menu, 
   X,
-  ChevronRight
+  ChevronRight,
+  Plus
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { Logo } from '../ui/Logo';
@@ -37,53 +38,93 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   return (
     <div className="app-shell">
       {/* Desktop Fixed Glassmorphic Sidebar */}
-      <aside className="border-r border-border/80 bg-surface/80 backdrop-blur-2xl transition-colors">
-        <Link to="/" className="flex items-center px-2 py-1">
-          <Logo size="lg" />
-        </Link>
+      <aside className="border-r border-border/80 bg-surface/90 backdrop-blur-2xl transition-colors flex flex-col justify-between">
+        <div>
+          <Link to="/" className="flex items-center px-2 py-1">
+            <Logo size="lg" />
+          </Link>
 
-        <nav className="side-nav mt-8 space-y-1">
-          {navItems.map(({ path, label, icon: Icon, isNew }) => {
-            const isActive = 
-              location.pathname === path || 
-              (path === '/setup' && location.pathname.startsWith('/interview'));
+          <nav className="side-nav mt-8 space-y-1">
+            {navItems.map(({ path, label, icon: Icon, isNew }) => {
+              const isActive = 
+                location.pathname === path || 
+                (path === '/setup' && location.pathname.startsWith('/interview'));
 
-            return (
-              <NavLink
-                key={path}
-                to={path}
-                onClick={() => {
-                  if (isNew) resetSetupDraft();
-                }}
-                className={isActive ? 'active shadow-xs' : ''}
-              >
-                <Icon size={16} className={isActive ? 'text-primary' : 'text-foreground-muted'} />
-                <span>{label}</span>
-                {isActive && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
-                )}
-              </NavLink>
-            );
-          })}
-        </nav>
+              return (
+                <NavLink
+                  key={path}
+                  to={path}
+                  onClick={() => {
+                    if (isNew) resetSetupDraft();
+                  }}
+                  className={isActive ? 'active shadow-xs' : ''}
+                >
+                  <Icon size={16} className={isActive ? 'text-primary' : 'text-foreground-muted'} />
+                  <span>{label}</span>
+                  {isActive && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />
+                  )}
+                </NavLink>
+              );
+            })}
+          </nav>
+        </div>
 
-        {/* Bottom User Profile Section */}
-        <div className="mt-auto pt-4 border-t border-border/80 flex items-center justify-between px-1">
-          <Link to="/settings" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+        {/* Bottom Theme & User Profile Section */}
+        <div className="mt-auto pt-4 border-t border-border/80 space-y-3 px-1">
+          {/* Dedicated Theme Toggle Row */}
+          <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-zinc-100/80 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-700/60">
+            <span className="text-[11px] font-bold text-foreground-muted">Theme</span>
+            <ThemeToggle size="sm" />
+          </div>
+
+          {/* User Profile Card */}
+          <Link
+            to="/profile"
+            className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors group"
+          >
             <Avatar name={displayName} size="xs" status="online" />
-            <div className="flex flex-col">
-              <span className="font-bold text-foreground text-xs leading-none truncate max-w-[110px]">{displayName}</span>
-              <span className="text-[10px] text-foreground-muted mt-0.5">{user.targetRole || 'Candidate'}</span>
+            <div className="flex flex-col min-w-0 flex-1">
+              <span className="font-bold text-foreground text-xs leading-tight truncate group-hover:text-primary transition-colors">
+                {displayName}
+              </span>
+              <span className="text-[10px] text-foreground-muted truncate">
+                {user.targetRole || 'Candidate'}
+              </span>
             </div>
           </Link>
-          <ThemeToggle />
         </div>
       </aside>
 
       {/* Main Content Workspace */}
-      <div className="workspace">
+      <div className="workspace flex flex-col min-h-screen">
+        {/* Desktop Top Workspace Header */}
+        <header className="hidden md:flex items-center justify-between px-8 py-3.5 border-b border-border/60 bg-surface/60 backdrop-blur-xl sticky top-0 z-30">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-xs font-bold text-foreground-muted">
+              {user.targetRole ? `${user.targetRole} Prep Track` : 'Interview Simulation Active'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <ThemeToggle size="sm" />
+            <Link
+              to="/setup"
+              onClick={() => resetSetupDraft()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-colors border border-primary/20"
+            >
+              <Plus size={14} />
+              <span>New Simulation</span>
+            </Link>
+            <Link to="/profile">
+              <Avatar name={displayName} size="xs" status="online" />
+            </Link>
+          </div>
+        </header>
+
         {/* Mobile Header Bar */}
-        <header className="workspace-mobile px-4 py-3 border-b border-border/80 bg-surface/80 backdrop-blur-xl flex items-center justify-between">
+        <header className="workspace-mobile md:hidden px-4 py-3 border-b border-border/80 bg-surface/80 backdrop-blur-xl flex items-center justify-between sticky top-0 z-30">
           <Link to="/" className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-indigo-500 to-pink-500 p-[1px]">
               <div className="w-full h-full rounded-[5px] bg-[#0b0b12] flex items-center justify-center text-[9px] font-extrabold text-white">
@@ -94,9 +135,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </Link>
 
           <div className="flex items-center gap-2">
-            <ThemeToggle />
+            <ThemeToggle size="sm" />
             <button
-              className="p-1.5 rounded-xl text-foreground-muted hover:text-foreground hover:bg-surface-subtle"
+              className="p-1.5 rounded-xl text-foreground-muted hover:text-foreground hover:bg-surface-subtle cursor-pointer"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle navigation menu"
             >
@@ -139,7 +180,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                     </Link>
                     <button
                       onClick={() => setMobileMenuOpen(false)}
-                      className="p-1.5 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-subtle"
+                      className="p-1.5 rounded-lg text-foreground-muted hover:text-foreground hover:bg-surface-subtle cursor-pointer"
                     >
                       <X size={18} />
                     </button>
@@ -147,7 +188,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
                   {/* Nav List */}
                   <nav className="mt-6 space-y-1.5">
-                    {navItems.map(({ path, label, icon: Icon }, idx) => {
+                    {navItems.map(({ path, label, icon: Icon, isNew }, idx) => {
                       const isActive = 
                         location.pathname === path || 
                         (path === '/setup' && location.pathname.startsWith('/interview'));
@@ -161,7 +202,10 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                         >
                           <NavLink
                             to={path}
-                            onClick={() => setMobileMenuOpen(false)}
+                            onClick={() => {
+                              if (isNew) resetSetupDraft();
+                              setMobileMenuOpen(false);
+                            }}
                             className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                               isActive
                                 ? 'bg-primary/10 text-primary border border-primary/30 font-bold shadow-xs'
@@ -181,23 +225,35 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 </div>
 
                 {/* Drawer Footer */}
-                <div className="pt-4 border-t border-border/80 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name="Charan Tej" size="xs" status="online" />
-                    <div>
-                      <div className="font-bold text-xs text-foreground">Charan Tej</div>
-                      <div className="text-[10px] text-foreground-muted">Pro Member</div>
-                    </div>
+                <div className="pt-4 border-t border-border/80 space-y-3">
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-100/80 dark:bg-zinc-800/60 border border-zinc-200/60 dark:border-zinc-700/60">
+                    <span className="text-xs font-bold text-foreground-muted">Theme</span>
+                    <ThemeToggle size="sm" />
                   </div>
-                  <ThemeToggle />
+
+                  <Link
+                    to="/profile"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors"
+                  >
+                    <Avatar name={displayName} size="xs" status="online" />
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="font-bold text-xs text-foreground truncate">{displayName}</span>
+                      <span className="text-[10px] text-foreground-muted truncate">{user.targetRole || 'Candidate'}</span>
+                    </div>
+                  </Link>
                 </div>
               </motion.div>
             </>
           )}
         </AnimatePresence>
 
-        {children}
+        <div className="flex-1">
+          {children}
+        </div>
       </div>
     </div>
   );
 };
+
+export default AppShell;

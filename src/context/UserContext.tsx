@@ -167,7 +167,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return { error: 'Too many verification attempts. Please wait before requesting another code.' };
         }
         if (status === 500 || errorMsg.includes('error sending') || errorMsg.includes('smtp')) {
-          return { error: 'Failed to deliver verification email. Please verify that your Supabase SMTP sender email matches your provider configuration (e.g. onboarding@resend.dev for Resend).' };
+          return { error: 'Failed to deliver verification email. Please verify your Supabase custom SMTP configuration (Authentication -> SMTP Settings).' };
         }
         return { error: error.message };
       }

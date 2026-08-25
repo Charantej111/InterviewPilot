@@ -1,0 +1,36 @@
+/* ReactBits Preloader Styles */
+.reactbits-preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #090a0f;
+  color: #ffffff;
+  user-select: none;
+  overflow: hidden;
+}
+
+.reactbits-preloader-glow {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(168, 85, 247, 0.15) 50%, transparent 70%);
+  filter: blur(60px);
+  pointer-events: none;
+  animation: reactbits-pulse 3s ease-in-out infinite alternate;
+}
+
+@keyframes reactbits-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}

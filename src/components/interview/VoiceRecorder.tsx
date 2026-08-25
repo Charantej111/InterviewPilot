@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { ShiningText } from '../ui/ShiningText';
+import { Waveform } from '../ui/Waveform';
 import { RotateCcw, Volume2, Mic, MicOff, AudioWaveform, Keyboard } from 'lucide-react';
 import { formatTime } from '../../lib/utils';
 import { VoiceStatus, InterviewEngineState } from '../../types/interview';
@@ -100,24 +101,14 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       <div className="py-2 flex flex-col items-center justify-center space-y-3">
         <div 
           onClick={isAISpeaking ? onInterrupt : onToggleRecording}
-          className="voice-wave-wrapper relative mx-auto cursor-pointer"
+          className="w-full max-w-sm mx-auto cursor-pointer p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 hover:border-primary/40 transition-all shadow-inner"
         >
-          {/* Gradient glow background */}
-          <div className="voice-glow">
-            <div className="glow-ellipse" />
-            <div className="glow-polygon" />
-          </div>
-
-          {/* Audio wave bars */}
-          <div className="audio-wave">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span
-                key={i}
-                className={`bar ${isListening || isAISpeaking ? 'active' : ''}`}
-                style={{ animationDelay: `${i * 0.12}s` }}
-              />
-            ))}
-          </div>
+          <Waveform
+            isActive={isListening || isAISpeaking}
+            speaker={isAISpeaking ? 'interviewer' : 'candidate'}
+            barCount={36}
+            className="h-12"
+          />
         </div>
 
         <p className="text-xs font-semibold text-foreground-muted">

@@ -168,6 +168,12 @@ export const Navbar: React.FC = () => {
               </button>
             </div>
           )}
+
+          {/* Mobile Theme Row */}
+          <div className="pt-2 border-t border-border/80 flex items-center justify-between px-3 py-1">
+            <span className="text-xs font-semibold text-foreground-muted">Theme</span>
+            <ThemeToggle size="sm" />
+          </div>
         </div>
       )}
     </div>

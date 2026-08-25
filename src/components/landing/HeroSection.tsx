@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 import ColorBends from '../reactbits/ColorBends';
 import StaggeredText from '../reactbits/StaggeredText';
 import { HeroChatbox } from './HeroChatbox';
@@ -33,27 +34,45 @@ export const HeroSection: React.FC = () => {
       </div>
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Main Headline with Proportionate Cursive "Good to See You!" */}
+        {/* Main Headline with Blur Fade-in */}
         <h1 className="tracking-tight leading-[1.15] mb-4">
-          <span className="inline-block font-cursive text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-foreground transform -rotate-1 drop-shadow-xs mb-1 select-none">
+          <motion.span
+            initial={{ opacity: 0, filter: 'blur(12px)', y: 15 }}
+            animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+            transition={{ duration: 0.65, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            className="inline-block font-cursive text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-foreground transform -rotate-1 drop-shadow-xs mb-1 select-none"
+          >
             Good to See You!
-          </span>
+          </motion.span>
           <span className="block text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold text-foreground tracking-tight mt-1">
             <StaggeredText
               text="Practice the interview you’re actually facing."
-              delay={0.15}
-              staggerDuration={0.02}
+              delay={0.3}
+              staggerDuration={0.04}
+              splitBy="words"
               direction="blur"
             />
           </span>
         </h1>
 
-        <p className="max-w-xl mx-auto text-xs sm:text-sm text-foreground-muted mb-4 leading-relaxed font-medium">
+        {/* Subtitle with Blur Fade-in */}
+        <motion.p
+          initial={{ opacity: 0, filter: 'blur(10px)', y: 15 }}
+          animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
+          transition={{ duration: 0.65, delay: 0.6, ease: 'easeOut' }}
+          className="max-w-xl mx-auto text-xs sm:text-sm text-foreground-muted mb-6 leading-relaxed font-medium"
+        >
           I'm your 24/7 personalized AI interviewer. Attach your resume or enter your target role below to begin.
-        </p>
+        </motion.p>
 
-        {/* The Premium AI Chatbox & Resume Dropzone */}
-        <HeroChatbox />
+        {/* The Premium AI Chatbox & Resume Dropzone with Blur Fade-in */}
+        <motion.div
+          initial={{ opacity: 0, filter: 'blur(12px)', y: 25, scale: 0.98 }}
+          animate={{ opacity: 1, filter: 'blur(0px)', y: 0, scale: 1 }}
+          transition={{ duration: 0.7, delay: 0.75, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <HeroChatbox />
+        </motion.div>
       </div>
     </section>
   );

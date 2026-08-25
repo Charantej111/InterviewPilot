@@ -590,15 +590,15 @@
 /* App Shell Layout */
 .app-shell {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 240px 1fr;
   min-height: 100vh;
 }
 
 .app-shell aside {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 220px;
-  padding: 27px 20px;
+  width: 240px;
+  padding: 24px 16px;
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -1426,5 +1426,49 @@
 html, body, * {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
+}
+
+/* Premium Bento Animated Gradient Border */
+.bento-card-wrapper {
+  position: relative;
+  border-radius: 1.75rem;
+  padding: 1.5px;
+  overflow: hidden;
+  isolation: isolate;
+  background: rgba(226, 232, 240, 0.6);
+}
+
+.dark .bento-card-wrapper {
+  background: rgba(39, 39, 42, 0.6);
+}
+
+.bento-card-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: -150%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 280deg,
+    rgba(99, 102, 241, 0.85) 320deg,
+    rgba(217, 70, 239, 0.95) 350deg,
+    transparent 360deg
+  );
+  animation: beamRotate 6s linear infinite;
+  opacity: 0.25;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.bento-card-wrapper:hover::before {
+  opacity: 1;
+  animation-duration: 3.5s;
+}
+
+.bento-card-content {
+  position: relative;
+  z-index: 1;
+  border-radius: calc(1.75rem - 1.5px);
+  height: 100%;
+  width: 100%;
 }
 
