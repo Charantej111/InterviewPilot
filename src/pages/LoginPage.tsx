@@ -16,6 +16,7 @@ export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isNewAccountError, setIsNewAccountError] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -26,7 +27,6 @@ export const LoginPage: React.FC = () => {
     isLoadingAuth,
     requestOtp,
     verifyOtp,
-    resendOtp,
     cooldownRemaining,
     isRequestingOtp,
     isVerifyingOtp,
@@ -46,6 +46,7 @@ export const LoginPage: React.FC = () => {
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setIsNewAccountError(false);
     setSuccessMessage(null);
 
     const cleanEmail = email.trim();
@@ -56,9 +57,12 @@ export const LoginPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const res = await requestOtp(cleanEmail);
+      const res = await requestOtp(cleanEmail, { isLogin: true });
       if (res.error) {
         setErrorMessage(res.error);
+        if (res.isNewAccount) {
+          setIsNewAccountError(true);
+        }
       } else {
         setStep('otp');
         setSuccessMessage(`We sent a 6-digit code to ${cleanEmail}`);
@@ -101,7 +105,7 @@ export const LoginPage: React.FC = () => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const res = await resendOtp(email);
+    const res = await requestOtp(email, { isLogin: true });
     if (res.error) {
       setErrorMessage(res.error);
     } else {
@@ -161,8 +165,18 @@ export const LoginPage: React.FC = () => {
               </div>
 
               {errorMessage && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center">
-                  {errorMessage}
+                <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center space-y-2">
+                  <p>{errorMessage}</p>
+                  {isNewAccountError && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => navigate('/signup')}
+                      className="w-full justify-center text-xs font-bold"
+                    >
+                      Create a New Account
+                    </Button>
+                  )}
                 </div>
               )}
 

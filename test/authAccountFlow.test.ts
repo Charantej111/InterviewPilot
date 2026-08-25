@@ -283,6 +283,54 @@ export async function runAuthAccountFlowTests() {
     assert(executionCount === 1, 'Underlying sync executed exactly once despite 3 concurrent calls');
   });
 
+  // 21. Pre-flight Existing User Detection on Signup
+  test('Scenario 21: Pre-flight check blocks existing email from signing up and directs to login', async () => {
+    const existingEmails = new Set(['existing.candidate@domain.com', 'user@interviewpilot.io']);
+    const checkEmailSim = async (email: string) => existingEmails.has(email.toLowerCase());
+
+    const signupPreflight = async (email: string) => {
+      const exists = await checkEmailSim(email);
+      if (exists) {
+        return {
+          error: 'An account already exists with this email. Please sign in instead.',
+          isExistingAccount: true,
+        };
+      }
+      return { success: true };
+    };
+
+    const resExisting = await signupPreflight('existing.candidate@domain.com');
+    assert(resExisting.isExistingAccount === true, 'isExistingAccount flag is true');
+    assert(resExisting.error === 'An account already exists with this email. Please sign in instead.', 'Correct error text returned');
+
+    const resNew = await signupPreflight('fresh.candidate@domain.com');
+    assert(resNew.success === true, 'New email allowed to continue signup');
+  });
+
+  // 22. Pre-flight Non-Existing User Detection on Login
+  test('Scenario 22: Pre-flight check blocks non-existing email from logging in and directs to signup', async () => {
+    const existingEmails = new Set(['registered@domain.com']);
+    const checkEmailSim = async (email: string) => existingEmails.has(email.toLowerCase());
+
+    const loginPreflight = async (email: string) => {
+      const exists = await checkEmailSim(email);
+      if (!exists) {
+        return {
+          error: 'No account found with this email. Please sign up to create an account.',
+          isNewAccount: true,
+        };
+      }
+      return { success: true };
+    };
+
+    const resNonExistent = await loginPreflight('unregistered@domain.com');
+    assert(resNonExistent.isNewAccount === true, 'isNewAccount flag is true');
+    assert(resNonExistent.error === 'No account found with this email. Please sign up to create an account.', 'Directs to signup');
+
+    const resRegistered = await loginPreflight('registered@domain.com');
+    assert(resRegistered.success === true, 'Existing user allowed to request login OTP');
+  });
+
   await Promise.all(promises);
   return { passed, failed };
 }

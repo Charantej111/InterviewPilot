@@ -18,6 +18,12 @@ export interface AuthDiagnosticsData {
   lastAuthEvent: string;
 }
 
+export interface RequestOtpOptions {
+  name?: string;
+  isSignup?: boolean;
+  isLogin?: boolean;
+}
+
 export interface UserContextType {
   user: UserProfile;
   preferences: UserPreferences;
@@ -29,7 +35,10 @@ export interface UserContextType {
   cooldownRemaining: number;
   onboardingComplete: boolean;
   diagnostics: AuthDiagnosticsData;
-  requestOtp: (email: string, name?: string) => Promise<{ error?: string; isExistingAccount?: boolean }>;
+  requestOtp: (
+    email: string,
+    nameOrOptions?: string | RequestOtpOptions
+  ) => Promise<{ error?: string; isExistingAccount?: boolean; isNewAccount?: boolean }>;
   verifyOtp: (email: string, token: string) => Promise<{ error?: string; user?: UserProfile }>;
   resendOtp: (email: string) => Promise<{ error?: string }>;
   logout: () => Promise<void>;
@@ -181,16 +190,24 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   /**
-   * Request email OTP for login or signup with app-level rate-limit guards.
+   * Request email OTP for login or signup with app-level rate-limit guards and existing-user preflight detection.
    */
   const requestOtp = async (
     email: string,
-    name?: string
-  ): Promise<{ error?: string; isExistingAccount?: boolean }> => {
+    nameOrOptions?: string | RequestOtpOptions
+  ): Promise<{ error?: string; isExistingAccount?: boolean; isNewAccount?: boolean }> => {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
       return { error: 'Please provide a valid email address.' };
     }
+
+    const opts: RequestOtpOptions = typeof nameOrOptions === 'string'
+      ? { name: nameOrOptions }
+      : nameOrOptions || {};
+
+    const name = opts.name?.trim();
+    const isSignup = Boolean(opts.isSignup);
+    const isLogin = Boolean(opts.isLogin);
 
     // 1. In-flight guard: prevent concurrent or double-click requests
     if (inFlightRequestRef.current || isRequestingOtp) {
@@ -208,13 +225,37 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsRequestingOtp(true);
 
     try {
+      // 3. Pre-flight Check: If signing up, verify account does NOT already exist
+      if (isSignup) {
+        const alreadyExists = await profileService.checkEmailExists(cleanEmail);
+        if (alreadyExists) {
+          return {
+            error: 'An account already exists with this email. Please sign in instead.',
+            isExistingAccount: true,
+          };
+        }
+      }
+
+      // 4. Pre-flight Check: If logging in, verify account DOES exist
+      if (isLogin) {
+        const exists = await profileService.checkEmailExists(cleanEmail);
+        if (!exists) {
+          return {
+            error: 'No account found with this email. Please sign up to create an account.',
+            isNewAccount: true,
+          };
+        }
+      }
+
+      // 5. Authoritative Supabase Auth OTP request
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
-          data: name?.trim()
+          shouldCreateUser: isSignup,
+          data: name
             ? {
-                full_name: name.trim(),
-                name: name.trim(),
+                full_name: name,
+                name: name,
               }
             : undefined,
         },

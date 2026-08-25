@@ -173,4 +173,29 @@ export const profileService = {
       throw error;
     }
   },
+
+  /**
+   * Checks whether an account exists in the database for the given email address via secure RPC.
+   * Never leaks user tokens, passwords, or personal details.
+   */
+  async checkEmailExists(email: string): Promise<boolean> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return false;
+
+    try {
+      const { data, error } = await (supabase.rpc as any)('check_user_exists', {
+        lookup_email: cleanEmail,
+      });
+
+      if (error) {
+        console.warn('[profileService] check_user_exists warning:', error);
+        return false;
+      }
+
+      return Boolean(data);
+    } catch (err) {
+      console.warn('[profileService] check_user_exists exception:', err);
+      return false;
+    }
+  },
 };

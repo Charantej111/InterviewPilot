@@ -28,7 +28,6 @@ export const SignupPage: React.FC = () => {
     isLoadingAuth,
     requestOtp,
     verifyOtp,
-    resendOtp,
     cooldownRemaining,
     isRequestingOtp,
     isVerifyingOtp,
@@ -61,7 +60,7 @@ export const SignupPage: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      const res = await requestOtp(cleanEmail, cleanName);
+      const res = await requestOtp(cleanEmail, { name: cleanName, isSignup: true });
       if (res.error) {
         setErrorMessage(res.error);
         if (res.isExistingAccount) {
@@ -109,7 +108,7 @@ export const SignupPage: React.FC = () => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const res = await resendOtp(email);
+    const res = await requestOtp(email, { name: name.trim(), isSignup: true });
     if (res.error) {
       setErrorMessage(res.error);
     } else {

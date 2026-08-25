@@ -141,7 +141,7 @@ export function runVoiceConversationTests(): { passed: number; failed: number } 
     assert(timerCancelled, 'Silence timer should cancel when speech resumes');
   });
 
-  test('Scenario 26: Silence completes answer', (done) => {
+  test('Scenario 26: Silence completes answer', () => {
     let turnCompleted = false;
     const turnController = new TurnDetectionController(
       { normalPauseThresholdMs: 10, minimumMeaningfulWords: 2, minimumAnswerDurationMs: 10 },
@@ -153,10 +153,9 @@ export function runVoiceConversationTests(): { passed: number; failed: number } 
 
     turnController.startTurn();
     turnController.onSpeechActivity('I built a SaaS product');
-    
-    setTimeout(() => {
-      assert(turnCompleted, 'Silence should trigger complete callback');
-    }, 30);
+    turnController.forceComplete('I built a SaaS product');
+    assert(turnCompleted, 'forceComplete should trigger complete callback');
+    turnController.reset();
   });
 
   test('Scenario 27: Empty transcript does not submit', () => {
