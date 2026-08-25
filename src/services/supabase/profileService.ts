@@ -7,7 +7,13 @@ type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
 type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
 
 export const profileService = {
+  /**
+   * Authoritative, idempotent profile loader.
+   * If a profile row does not exist for the authenticated userId, it initializes a clean default row using upsert.
+   */
   async getProfile(userId: string, authEmail?: string): Promise<{ profile: UserProfile; preferences: UserPreferences } | null> {
+    if (!userId) return null;
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -20,51 +26,8 @@ export const profileService = {
     }
 
     if (!data) {
-      // If profile does not exist yet, create initial empty profile
-      const newProfile: ProfileInsert = {
-        id: userId,
-        full_name: authEmail ? authEmail.split('@')[0] : 'Candidate',
-        target_role: '',
-        target_companies: [],
-        experience_level: '',
-        streak_days: 0,
-        last_active_date: new Date().toISOString().split('T')[0],
-        interviews_completed: 0,
-        average_score: 0.0,
-        readiness_percentage: 0,
-        readiness_delta: 0,
-        preferences: defaultPreferences as unknown as Json,
-      };
-
-      const { data: inserted, error: insertError } = await supabase
-        .from('profiles')
-        .insert(newProfile)
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('Error creating profile row:', insertError);
-        throw insertError;
-      }
-
-      return {
-        profile: {
-          id: inserted.id,
-          name: inserted.full_name || (authEmail ? authEmail.split('@')[0] : 'Candidate'),
-          email: authEmail || '',
-          avatarUrl: inserted.avatar_url || undefined,
-          targetRole: inserted.target_role || '',
-          targetCompanies: inserted.target_companies || [],
-          experienceLevel: (inserted.experience_level as UserProfile['experienceLevel']) || '',
-          streakDays: inserted.streak_days || 0,
-          lastActiveDate: inserted.last_active_date || new Date().toISOString().split('T')[0],
-          interviewsCompleted: inserted.interviews_completed || 0,
-          averageScore: Number(inserted.average_score) || 0.0,
-          readinessPercentage: inserted.readiness_percentage || 0,
-          readinessDelta: inserted.readiness_delta || 0,
-        },
-        preferences: (inserted.preferences as unknown as UserPreferences) || defaultPreferences,
-      };
+      // If profile does not exist yet, create initial profile idempotently using upsert
+      return this.repairProfile(userId, authEmail);
     }
 
     const prefs = (data.preferences as unknown as UserPreferences) || defaultPreferences;
@@ -86,6 +49,86 @@ export const profileService = {
         readinessDelta: data.readiness_delta || 0,
       },
       preferences: prefs,
+    };
+  },
+
+  /**
+   * Safely repairs or initializes a missing profile for an existing authenticated Supabase user.
+   * Uses ON CONFLICT (id) DO NOTHING/UPDATE to guarantee idempotency under concurrent invocations.
+   */
+  async repairProfile(userId: string, authEmail?: string): Promise<{ profile: UserProfile; preferences: UserPreferences }> {
+    const defaultName = authEmail ? authEmail.split('@')[0] : 'Candidate';
+    const newProfile: ProfileInsert = {
+      id: userId,
+      full_name: defaultName,
+      target_role: '',
+      target_companies: [],
+      experience_level: '',
+      streak_days: 0,
+      last_active_date: new Date().toISOString().split('T')[0],
+      interviews_completed: 0,
+      average_score: 0.0,
+      readiness_percentage: 0,
+      readiness_delta: 0,
+      preferences: defaultPreferences as unknown as Json,
+    };
+
+    const { data: upserted, error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(newProfile, { onConflict: 'id' })
+      .select()
+      .single();
+
+    if (upsertError) {
+      // In case of race condition where another concurrent worker completed upsert, re-query once
+      const { data: retryData, error: retryError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (retryError || !retryData) {
+        console.error('Error repairing/upserting profile row:', upsertError);
+        throw upsertError;
+      }
+
+      return {
+        profile: {
+          id: retryData.id,
+          name: retryData.full_name || defaultName,
+          email: authEmail || '',
+          avatarUrl: retryData.avatar_url || undefined,
+          targetRole: retryData.target_role || '',
+          targetCompanies: retryData.target_companies || [],
+          experienceLevel: (retryData.experience_level as UserProfile['experienceLevel']) || '',
+          streakDays: retryData.streak_days || 0,
+          lastActiveDate: retryData.last_active_date || new Date().toISOString().split('T')[0],
+          interviewsCompleted: retryData.interviews_completed || 0,
+          averageScore: Number(retryData.average_score) || 0.0,
+          readinessPercentage: retryData.readiness_percentage || 0,
+          readinessDelta: retryData.readiness_delta || 0,
+        },
+        preferences: (retryData.preferences as unknown as UserPreferences) || defaultPreferences,
+      };
+    }
+
+    return {
+      profile: {
+        id: upserted.id,
+        name: upserted.full_name || defaultName,
+        email: authEmail || '',
+        avatarUrl: upserted.avatar_url || undefined,
+        targetRole: upserted.target_role || '',
+        targetCompanies: upserted.target_companies || [],
+        experienceLevel: (upserted.experience_level as UserProfile['experienceLevel']) || '',
+        streakDays: upserted.streak_days || 0,
+        lastActiveDate: upserted.last_active_date || new Date().toISOString().split('T')[0],
+        interviewsCompleted: upserted.interviews_completed || 0,
+        averageScore: Number(upserted.average_score) || 0.0,
+        readinessPercentage: upserted.readiness_percentage || 0,
+        readinessDelta: upserted.readiness_delta || 0,
+      },
+      preferences: (upserted.preferences as unknown as UserPreferences) || defaultPreferences,
     };
   },
 

@@ -4,16 +4,33 @@ import { createDefaultUser, defaultPreferences } from '../data/defaults';
 import { supabase } from '../lib/supabase';
 import { profileService } from '../services/supabase/profileService';
 import { storage } from '../lib/storage';
+import { normalizeAuthError } from '../lib/authErrorNormalizer';
+import { isOnboardingComplete } from '../lib/onboardingRouter';
 
-interface UserContextType {
+export interface AuthDiagnosticsData {
+  authStatus: 'initializing' | 'authenticated' | 'unauthenticated';
+  authUserId: string | null;
+  maskedEmail: string | null;
+  profileExists: boolean;
+  profileId: string | null;
+  onboardingComplete: boolean;
+  profileSyncState: 'synced' | 'repairing' | 'idle' | 'failed';
+  lastAuthEvent: string;
+}
+
+export interface UserContextType {
   user: UserProfile;
   preferences: UserPreferences;
   isAuthenticated: boolean;
   isLoadingAuth: boolean;
+  authStatus: 'initializing' | 'authenticated' | 'unauthenticated';
   isRequestingOtp: boolean;
+  isVerifyingOtp: boolean;
   cooldownRemaining: number;
-  requestOtp: (email: string, name?: string) => Promise<{ error?: string }>;
-  verifyOtp: (email: string, token: string) => Promise<{ error?: string }>;
+  onboardingComplete: boolean;
+  diagnostics: AuthDiagnosticsData;
+  requestOtp: (email: string, name?: string) => Promise<{ error?: string; isExistingAccount?: boolean }>;
+  verifyOtp: (email: string, token: string) => Promise<{ error?: string; user?: UserProfile }>;
   resendOtp: (email: string) => Promise<{ error?: string }>;
   logout: () => Promise<void>;
   updatePreferences: (newPrefs: Partial<UserPreferences>) => Promise<void>;
@@ -32,28 +49,57 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     storage.get('is_authenticated', false)
   );
   const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
+  const [authStatus, setAuthStatus] = useState<'initializing' | 'authenticated' | 'unauthenticated'>('initializing');
   const [isRequestingOtp, setIsRequestingOtp] = useState<boolean>(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState<boolean>(false);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+  const [profileSyncState, setProfileSyncState] = useState<'synced' | 'repairing' | 'idle' | 'failed'>('idle');
+  const [lastAuthEvent, setLastAuthEvent] = useState<string>('INIT');
 
   const cooldownExpiresAtRef = useRef<number>(0);
   const inFlightRequestRef = useRef<boolean>(false);
+  const inFlightVerifyRef = useRef<boolean>(false);
+  const profileSyncPromiseRef = useRef<Promise<UserProfile | null> | null>(null);
   const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch or create profile idempotently
-  const fetchUserProfile = async (userId: string, email?: string) => {
-    try {
-      const data = await profileService.getProfile(userId, email);
-      if (data) {
-        setUser(data.profile);
-        setPreferences(data.preferences);
-        setIsAuthenticated(true);
-        storage.set('user_profile', data.profile);
-        storage.set('user_preferences', data.preferences);
-        storage.set('is_authenticated', true);
-      }
-    } catch (err) {
-      console.error('Error in fetchUserProfile:', err);
+  // Authoritative Single Profile Fetcher / Upserter with Mutex Guard
+  const fetchUserProfile = async (userId: string, email?: string): Promise<UserProfile | null> => {
+    if (!userId) return null;
+
+    // If an identical sync is already in flight, await it instead of executing duplicate API calls
+    if (profileSyncPromiseRef.current) {
+      await profileSyncPromiseRef.current;
+      return user;
     }
+
+    const syncPromise = (async () => {
+      setProfileSyncState('repairing');
+      try {
+        const data = await profileService.getProfile(userId, email);
+        if (data) {
+          setUser(data.profile);
+          setPreferences(data.preferences);
+          setIsAuthenticated(true);
+          setAuthStatus('authenticated');
+          setProfileSyncState('synced');
+          storage.set('user_profile', data.profile);
+          storage.set('user_preferences', data.preferences);
+          storage.set('is_authenticated', true);
+          return data.profile;
+        }
+        return null;
+      } catch (err) {
+        console.error('[UserContext] Profile synchronization error:', err);
+        setProfileSyncState('failed');
+        return null;
+      } finally {
+        profileSyncPromiseRef.current = null;
+      }
+    })();
+
+    profileSyncPromiseRef.current = syncPromise;
+    const result = await syncPromise;
+    return result;
   };
 
   // Cooldown countdown interval runner
@@ -80,6 +126,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, 1000);
   };
 
+  // Main Auth Lifecycle Listener
   useEffect(() => {
     let isMounted = true;
 
@@ -87,13 +134,19 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user && isMounted) {
+          setLastAuthEvent('INITIAL_SESSION');
           await fetchUserProfile(session.user.id, session.user.email);
         } else if (isMounted) {
           setIsAuthenticated(false);
+          setAuthStatus('unauthenticated');
           storage.set('is_authenticated', false);
         }
       } catch (err) {
-        console.error('Session check failed:', err);
+        console.error('[UserContext] Initial session check failed:', err);
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setAuthStatus('unauthenticated');
+        }
       } finally {
         if (isMounted) setIsLoadingAuth(false);
       }
@@ -102,10 +155,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      setLastAuthEvent(event);
+
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') && session?.user) {
         await fetchUserProfile(session.user.id, session.user.email);
       } else if (event === 'SIGNED_OUT') {
         setIsAuthenticated(false);
+        setAuthStatus('unauthenticated');
         const emptyUser = createDefaultUser();
         setUser(emptyUser);
         storage.set('is_authenticated', false);
@@ -126,7 +183,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Request email OTP for login or signup with app-level rate-limit guards.
    */
-  const requestOtp = async (email: string, name?: string): Promise<{ error?: string }> => {
+  const requestOtp = async (
+    email: string,
+    name?: string
+  ): Promise<{ error?: string; isExistingAccount?: boolean }> => {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
       return { error: 'Please provide a valid email address.' };
@@ -161,22 +221,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (error) {
-        const errorMsg = error.message.toLowerCase();
-        const status = (error as any).status;
-        if (status === 429 || errorMsg.includes('rate limit') || errorMsg.includes('over_email_send_rate_limit')) {
-          return { error: 'Too many verification attempts. Please wait before requesting another code.' };
-        }
-        if (status === 500 || errorMsg.includes('error sending') || errorMsg.includes('smtp')) {
-          return { error: 'Failed to deliver verification email. Please verify your Supabase custom SMTP configuration (Authentication -> SMTP Settings).' };
-        }
-        return { error: error.message };
+        const normalized = normalizeAuthError(error);
+        return {
+          error: normalized.userMessage,
+          isExistingAccount: normalized.isExistingAccount,
+        };
       }
 
       // Start 60-second cooldown only after a successful request
       startCooldownTimer(60);
       return {};
     } catch (err: any) {
-      return { error: err.message || 'Failed to send verification code. Please try again.' };
+      const normalized = normalizeAuthError(err);
+      return {
+        error: normalized.userMessage,
+        isExistingAccount: normalized.isExistingAccount,
+      };
     } finally {
       inFlightRequestRef.current = false;
       setIsRequestingOtp(false);
@@ -193,7 +253,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   /**
    * Verify the 6-digit email OTP.
    */
-  const verifyOtp = async (email: string, token: string): Promise<{ error?: string }> => {
+  const verifyOtp = async (
+    email: string,
+    token: string
+  ): Promise<{ error?: string; user?: UserProfile }> => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanToken = token.trim();
 
@@ -203,6 +266,13 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!cleanToken || cleanToken.length < 6 || cleanToken.length > 8) {
       return { error: 'Please enter the complete verification code.' };
     }
+
+    if (inFlightVerifyRef.current || isVerifyingOtp) {
+      return { error: 'Verification is in progress. Please wait a moment.' };
+    }
+
+    inFlightVerifyRef.current = true;
+    setIsVerifyingOtp(true);
 
     try {
       let { data, error } = await supabase.auth.verifyOtp({
@@ -224,23 +294,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (error) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes('expired') || msg.includes('timeout')) {
-          return { error: 'The verification code has expired. Please request a new one.' };
-        }
-        if (msg.includes('invalid') || msg.includes('incorrect')) {
-          return { error: 'Invalid verification code. Please check and try again.' };
-        }
-        return { error: error.message };
+        const normalized = normalizeAuthError(error);
+        return { error: normalized.userMessage };
       }
 
-      if (data.user) {
-        await fetchUserProfile(data.user.id, data.user.email);
+      let profileResult: UserProfile | null = null;
+      if (data?.user) {
+        profileResult = await fetchUserProfile(data.user.id, data.user.email);
       }
 
-      return {};
+      return { user: profileResult || undefined };
     } catch (err: any) {
-      return { error: err.message || 'Verification failed. Please try again.' };
+      const normalized = normalizeAuthError(err);
+      return { error: normalized.userMessage };
+    } finally {
+      inFlightVerifyRef.current = false;
+      setIsVerifyingOtp(false);
     }
   };
 
@@ -248,9 +317,10 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await supabase.auth.signOut();
     } catch (err) {
-      console.error('Logout error:', err);
+      console.error('[UserContext] Logout error:', err);
     } finally {
       setIsAuthenticated(false);
+      setAuthStatus('unauthenticated');
       const emptyUser = createDefaultUser();
       setUser(emptyUser);
       storage.set('is_authenticated', false);
@@ -267,7 +337,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         await profileService.updatePreferences(user.id, updated);
       } catch (err) {
-        console.error('Failed to sync preferences to Supabase:', err);
+        console.error('[UserContext] Failed to sync preferences to Supabase:', err);
       }
     }
   };
@@ -281,7 +351,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         await profileService.updateProfile(user.id, updated);
       } catch (err) {
-        console.error('Failed to sync profile to Supabase:', err);
+        console.error('[UserContext] Failed to sync profile to Supabase:', err);
       }
     }
   };
@@ -292,6 +362,29 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const onboardingComplete = isOnboardingComplete(user);
+
+  // Masked email for debug diagnostics
+  const maskEmail = (emailStr?: string | null): string | null => {
+    if (!emailStr) return null;
+    const parts = emailStr.split('@');
+    if (parts.length !== 2) return '***';
+    const namePart = parts[0];
+    const maskedName = namePart.length > 2 ? `${namePart.slice(0, 2)}***` : `${namePart[0]}***`;
+    return `${maskedName}@${parts[1]}`;
+  };
+
+  const diagnostics: AuthDiagnosticsData = {
+    authStatus,
+    authUserId: user.id || null,
+    maskedEmail: maskEmail(user.email),
+    profileExists: Boolean(user.id),
+    profileId: user.id || null,
+    onboardingComplete,
+    profileSyncState,
+    lastAuthEvent,
+  };
+
   return (
     <UserContext.Provider
       value={{
@@ -299,8 +392,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
         preferences,
         isAuthenticated,
         isLoadingAuth,
+        authStatus,
         isRequestingOtp,
+        isVerifyingOtp,
         cooldownRemaining,
+        onboardingComplete,
+        diagnostics,
         requestOtp,
         verifyOtp,
         resendOtp,

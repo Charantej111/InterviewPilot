@@ -61,8 +61,8 @@ export const ProfilePage: React.FC = () => {
   const [email, setEmail] = useState<string>(user.email || '');
   const [avatarUrl, setAvatarUrl] = useState<string>(user.avatarUrl || '');
   const [targetRole, setTargetRole] = useState<string>(user.targetRole || '');
-  const [experienceLevel, setExperienceLevel] = useState<any>(user.experienceLevel || 'Senior');
-  const [targetCompanies, setTargetCompanies] = useState<string[]>(user.targetCompanies || ['Google', 'Meta', 'Stripe']);
+  const [experienceLevel, setExperienceLevel] = useState<any>(user.experienceLevel || '');
+  const [targetCompanies, setTargetCompanies] = useState<string[]>(user.targetCompanies || []);
   const [newCompanyInput, setNewCompanyInput] = useState<string>('');
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState<boolean>(false);
@@ -77,9 +77,9 @@ export const ProfilePage: React.FC = () => {
       if (user.name) setName(user.name);
       if (user.email) setEmail(user.email);
       if (user.avatarUrl !== undefined) setAvatarUrl(user.avatarUrl || '');
-      if (user.targetRole) setTargetRole(user.targetRole);
-      if (user.experienceLevel) setExperienceLevel(user.experienceLevel);
-      if (user.targetCompanies && user.targetCompanies.length > 0) {
+      if (user.targetRole !== undefined) setTargetRole(user.targetRole || '');
+      if (user.experienceLevel !== undefined) setExperienceLevel(user.experienceLevel || '');
+      if (user.targetCompanies) {
         setTargetCompanies(user.targetCompanies);
       }
     }
@@ -120,14 +120,8 @@ export const ProfilePage: React.FC = () => {
     setResumeSuccess(null);
 
     try {
-      const res = await uploadResumeFile(file);
-      if (res.profile?.name && !name) {
-        setName(res.profile.name);
-      }
-      if (res.profile?.targetRole && !targetRole) {
-        setTargetRole(res.profile.targetRole);
-      }
-      setResumeSuccess(`Successfully parsed ${file.name}. Verified candidate evidence is active.`);
+      await uploadResumeFile(file);
+      setResumeSuccess(`Uploaded & parsed "${file.name}" successfully.`);
       setTimeout(() => setResumeSuccess(null), 4000);
     } catch (err: any) {
       console.error('Resume upload failed:', err);
@@ -138,7 +132,7 @@ export const ProfilePage: React.FC = () => {
   };
 
   const displayDisplayName = name || (email ? email.split('@')[0] : 'Candidate');
-  const readiness = user.readinessPercentage > 0 ? user.readinessPercentage : 78;
+  const readiness = user.readinessPercentage || 0;
   const hasActiveResume = Boolean(setupDraft.resumeParsed && setupDraft.resumeName);
 
   return (
@@ -253,7 +247,7 @@ export const ProfilePage: React.FC = () => {
               </div>
               <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" />
               <div className="text-center px-3">
-                <span className="text-2xl font-black text-foreground font-mono">{user.streakDays || 1}</span>
+                <span className="text-2xl font-black text-foreground font-mono">{user.streakDays || (user.interviewsCompleted ? 1 : 0)}</span>
                 <p className="text-[10px] text-foreground-muted font-bold uppercase tracking-wider">Day Streak</p>
               </div>
             </div>

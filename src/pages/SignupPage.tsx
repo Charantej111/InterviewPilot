@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
@@ -9,6 +9,7 @@ import { ArrowRight, ArrowLeft, Mail, User, RefreshCw, CheckCircle2 } from 'luci
 import { Logo } from '../components/ui/Logo';
 import { OtpInput } from '../components/auth/OtpInput';
 import { Component as AILoader } from '../components/ui/ai-loader';
+import { getPostAuthDestination } from '../lib/onboardingRouter';
 
 export const SignupPage: React.FC = () => {
   const [step, setStep] = useState<'details' | 'otp'>('details');
@@ -16,17 +17,38 @@ export const SignupPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isExistingUserError, setIsExistingUserError] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
 
-  const { requestOtp, verifyOtp, resendOtp, cooldownRemaining, isRequestingOtp } = useUser();
+  const {
+    user,
+    isAuthenticated,
+    isLoadingAuth,
+    requestOtp,
+    verifyOtp,
+    resendOtp,
+    cooldownRemaining,
+    isRequestingOtp,
+    isVerifyingOtp,
+  } = useUser();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // If already authenticated, redirect immediately without rendering signup form
+  useEffect(() => {
+    if (!isLoadingAuth && isAuthenticated) {
+      const destination = getPostAuthDestination(user, location.state?.from?.pathname);
+      navigate(destination, { replace: true });
+    }
+  }, [isAuthenticated, isLoadingAuth, user, navigate, location.state]);
 
   // Step 1: Send OTP to new user email
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setIsExistingUserError(false);
     setSuccessMessage(null);
 
     const cleanEmail = email.trim();
@@ -42,6 +64,9 @@ export const SignupPage: React.FC = () => {
       const res = await requestOtp(cleanEmail, cleanName);
       if (res.error) {
         setErrorMessage(res.error);
+        if (res.isExistingAccount) {
+          setIsExistingUserError(true);
+        }
       } else {
         setStep('otp');
         setSuccessMessage(`We sent a 6-digit code to ${cleanEmail}`);
@@ -70,7 +95,8 @@ export const SignupPage: React.FC = () => {
         setIsSubmitting(false);
       } else {
         setIsRegistering(true);
-        navigate('/setup');
+        const destination = getPostAuthDestination(res.user || user, location.state?.from?.pathname);
+        navigate(destination, { replace: true });
       }
     } catch {
       setIsSubmitting(false);
@@ -143,8 +169,18 @@ export const SignupPage: React.FC = () => {
               </div>
 
               {errorMessage && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center">
-                  {errorMessage}
+                <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-medium text-center space-y-2">
+                  <p>{errorMessage}</p>
+                  {isExistingUserError && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => navigate('/login')}
+                      className="w-full justify-center text-xs font-bold"
+                    >
+                      Sign In to Existing Account
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -239,8 +275,8 @@ export const SignupPage: React.FC = () => {
                 <Button
                   type="submit"
                   size="lg"
-                  isLoading={isSubmitting}
-                  disabled={otp.length < 6 || isSubmitting}
+                  isLoading={isSubmitting || isVerifyingOtp}
+                  disabled={otp.length < 6 || isSubmitting || isVerifyingOtp}
                   className="w-full justify-center"
                   rightIcon={<ArrowRight className="w-4 h-4" />}
                 >

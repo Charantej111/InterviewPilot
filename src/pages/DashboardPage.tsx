@@ -90,10 +90,17 @@ export const DashboardPage: React.FC = () => {
     user.readinessPercentage > 0
       ? user.readinessPercentage
       : recentInterviews.length > 0
-      ? Math.round((recentInterviews.reduce((acc, r) => acc + r.score, 0) / recentInterviews.length) * 10)
-      : 74;
+      ? Math.round((recentInterviews.reduce((acc, r) => acc + (r.score || 0), 0) / recentInterviews.length) * 10)
+      : 0;
   const displayCompleted = user.interviewsCompleted || recentInterviews.length || 0;
-  const displayStreak = user.streakDays || (displayCompleted > 0 ? 3 : 1);
+  const displayStreak = user.streakDays || (displayCompleted > 0 ? 1 : 0);
+
+  // Derive historical trajectory points from real recent interviews
+  const scoreHistory = recentInterviews.map((item) => ({
+    date: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    role: item.role,
+    score: item.score,
+  })).reverse();
 
   if (isLoading) {
     return (
@@ -157,7 +164,7 @@ export const DashboardPage: React.FC = () => {
                 items={[
                   <div key="1" className="p-1 text-[9px] font-bold text-slate-900">{firstName || 'Profile'}</div>,
                   <div key="2" className="p-1 text-[9px] font-bold text-emerald-700">{displayCompleted} Loops</div>,
-                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{displayScore}% Bar</div>,
+                  <div key="3" className="p-1 text-[9px] font-bold text-purple-700">{displayScore > 0 ? `${displayScore}% Bar` : 'Uncalibrated'}</div>,
                 ]}
               />
             </div>
@@ -195,9 +202,17 @@ export const DashboardPage: React.FC = () => {
               </div>
             </div>
             <div className="flex items-baseline gap-2.5">
-              <span className="text-3xl sm:text-4xl font-black text-foreground font-mono">{displayScore}%</span>
-              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                {displayScore >= 80 ? 'Lean Hire Bar' : 'Calibrating'}
+              <span className="text-3xl sm:text-4xl font-black text-foreground font-mono">
+                {displayScore > 0 ? `${displayScore}%` : '--'}
+              </span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                displayScore >= 80
+                  ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
+                  : displayScore > 0
+                  ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10'
+                  : 'text-zinc-500 bg-zinc-500/10'
+              }`}>
+                {displayScore >= 80 ? 'Lean Hire Bar' : displayScore > 0 ? 'Calibrating' : 'Pending First Loop'}
               </span>
             </div>
             <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
@@ -206,7 +221,9 @@ export const DashboardPage: React.FC = () => {
                 style={{ width: `${Math.min(100, displayScore)}%` }}
               />
             </div>
-            <p className="text-[11px] text-foreground-muted">Synthesized across 6 core STAR dimensions</p>
+            <p className="text-[11px] text-foreground-muted">
+              {displayScore > 0 ? 'Synthesized across 6 core STAR dimensions' : 'Complete an interview to calculate readiness'}
+            </p>
           </div>
 
           {/* Card 2: Completed Loops */}
@@ -255,10 +272,10 @@ export const DashboardPage: React.FC = () => {
             </div>
             <div>
               <h4 className="text-base font-extrabold text-foreground truncate max-w-[190px]">
-                {user.targetRole || 'Target Role'}
+                {user.targetRole || 'Not Configured'}
               </h4>
               <p className="text-xs text-foreground-muted truncate">
-                {user.targetCompanies && user.targetCompanies.length > 0 ? user.targetCompanies.join(', ') : 'Top Tech Bars'}
+                {user.targetCompanies && user.targetCompanies.length > 0 ? user.targetCompanies.join(', ') : 'No dream companies set'}
               </p>
             </div>
             <p className="text-[11px] text-foreground-muted">
@@ -269,8 +286,8 @@ export const DashboardPage: React.FC = () => {
 
         {/* Visual Analytics Row: Competency Radar & Historical Trajectory */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <CompetencyRadarWidget />
-          <ScoreTrajectoryWidget />
+          <CompetencyRadarWidget isCalibrated={recentInterviews.length > 0} />
+          <ScoreTrajectoryWidget history={scoreHistory} />
         </div>
 
         {/* Curated Company Interview Tracks */}

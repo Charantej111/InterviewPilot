@@ -7,6 +7,7 @@ import { runStructuralParsingTests } from './resumeStructure.test';
 import { runInterviewLifecycleTests } from './interviewLifecycle.test';
 import { runVoiceConversationTests } from './voiceConversation.test';
 import { runRoleScopedResumeGroundedTests } from './roleScopedResumeGrounded.test';
+import { runAuthAccountFlowTests } from './authAccountFlow.test';
 
 console.log('====================================================');
 console.log('  RUNNING INTERVIEWPILOT ENGINE REGRESSION TEST SUITE  ');
@@ -41,38 +42,46 @@ const lifecycleResults = runInterviewLifecycleTests();
 console.log('\n--- 8. Testing New Phase 5 Voice Safety & Transcript Reducers ---');
 const voiceConvResults = runVoiceConversationTests();
 
-console.log('\n--- 9. Testing Role-Scoped Resume Grounding & Archetype Isolation Engine ---');
-const roleScopedResults = runRoleScopedResumeGroundedTests();
+async function main() {
+  console.log('\n--- 9. Testing Role-Scoped Resume Grounding & Archetype Isolation Engine ---');
+  const roleScopedResults = runRoleScopedResumeGroundedTests();
 
-const totalPassed = 
-  aiPipelineResults.passed + 
-  resumeResults.passed + 
-  structuralResults.passed + 
-  voiceIntegrityResults.passed + 
-  brainResults.passed + 
-  answerIntelligenceCount +
-  lifecycleResults.passed +
-  voiceConvResults.passed +
-  roleScopedResults.passed;
+  const authResults = await runAuthAccountFlowTests();
 
-const totalFailed = 
-  aiPipelineResults.failed + 
-  resumeResults.failed + 
-  structuralResults.failed + 
-  voiceIntegrityResults.failed + 
-  brainResults.failed +
-  lifecycleResults.failed +
-  voiceConvResults.failed +
-  roleScopedResults.failed;
+  const totalPassed = 
+    aiPipelineResults.passed + 
+    resumeResults.passed + 
+    structuralResults.passed + 
+    voiceIntegrityResults.passed + 
+    brainResults.passed + 
+    answerIntelligenceCount +
+    lifecycleResults.passed +
+    voiceConvResults.passed +
+    roleScopedResults.passed +
+    authResults.passed;
 
-console.log('\n====================================================');
-console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);
-console.log('====================================================');
+  const totalFailed = 
+    aiPipelineResults.failed + 
+    resumeResults.failed + 
+    structuralResults.failed + 
+    voiceIntegrityResults.failed + 
+    brainResults.failed +
+    lifecycleResults.failed +
+    voiceConvResults.failed +
+    roleScopedResults.failed +
+    authResults.failed;
 
-if (totalFailed > 0) {
-  console.error(`💥 ${totalFailed} tests failed!`);
-  process.exit(1);
-} else {
-  console.log(`🎉 ALL ${totalPassed} TESTS & REGRESSION SCENARIOS PASSED WITH 100% SUCCESS!`);
-  process.exit(0);
+  console.log('\n====================================================');
+  console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);
+  console.log('====================================================');
+
+  if (totalFailed > 0) {
+    console.error(`💥 ${totalFailed} tests failed!`);
+    process.exit(1);
+  } else {
+    console.log(`🎉 ALL ${totalPassed} TESTS & REGRESSION SCENARIOS PASSED WITH 100% SUCCESS!`);
+    process.exit(0);
+  }
 }
+
+main();

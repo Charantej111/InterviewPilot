@@ -21,6 +21,7 @@ import { ProfilePage } from './pages/ProfilePage';
 
 import { CustomCursor } from './components/ui/CustomCursor';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { AuthDiagnosticsOverlay } from './components/auth/AuthDiagnosticsOverlay';
 import { EmojiProvider } from 'react-apple-emojis';
 import emojiData from 'react-apple-emojis/src/data.json';
 
@@ -52,12 +53,13 @@ export const App: React.FC = () => {
           <InterviewProvider>
             <CustomCursor />
             <BrowserRouter>
-            <Routes>
-              {/* Marketing & Auth */}
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
-              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <AuthDiagnosticsOverlay />
+              <Routes>
+                {/* Marketing & Auth */}
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
               {/* Workspace Dashboard */}
               <Route
