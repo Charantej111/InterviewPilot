@@ -94,7 +94,7 @@ export function validateQuestion(
   const order = (existingQuestions.length || 0) + 1;
 
   const validated: Question = {
-    id: candidateQuestion.id || `q_${Date.now()}_${order}`,
+    id: candidateQuestion.id || crypto.randomUUID(),
     order,
     type: objective.isFollowUp ? 'follow_up' : 'initial',
     questionType: objective.questionType,
@@ -144,7 +144,7 @@ export function generateFallbackQuestion(
   }
 
   return {
-    id: `q_fallback_${Date.now()}_${order}`,
+    id: crypto.randomUUID(),
     order,
     type: objective.isFollowUp ? 'follow_up' : 'initial',
     questionType: objective.questionType,
@@ -191,7 +191,7 @@ export function validateQuestionSet(
     }
     existingTexts.add(norm);
     validatedQuestions.push({
-      id: q.id || `q_${i + 1}`,
+      id: q.id || crypto.randomUUID(),
       order: i + 1,
       type: q.type || 'initial',
       questionType: q.questionType || 'product_sense',
@@ -232,7 +232,7 @@ export function validateSingleQuestion(
   return {
     isValid: true,
     validated: {
-      id: question.id || `q_${idx + 1}`,
+      id: question.id || crypto.randomUUID(),
       order: idx + 1,
       type: question.type || 'initial',
       questionType: question.questionType || 'product_sense',

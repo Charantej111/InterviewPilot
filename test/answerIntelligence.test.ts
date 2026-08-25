@@ -29,7 +29,7 @@ import type {
 import type { LockedCandidateContext } from '../src/types/resume';
 import type { JDEvidenceModel } from '../src/types/jobDescription';
 
-function assert(condition: boolean, message: string) {
+function assert(condition: unknown, message: string) {
   if (!condition) {
     throw new Error(`Assertion Failed: ${message}`);
   }
@@ -42,29 +42,37 @@ export function runAnswerIntelligenceTests(): number {
 
   const mockQuestion: Question = {
     id: 'q_test_1',
-    text: 'How would you investigate a 15% DAU decline for a mobile app?',
-    category: 'Product Analytics',
-    targetCompetency: 'Product Analytics & Metrics',
+    order: 1,
+    type: 'initial',
     questionType: 'analytical',
+    source: 'job_description',
+    sourceReference: 'Core Responsibilities',
+    targetCompetency: 'Product Analytics & Metrics',
+    category: 'Product Analytics',
+    text: 'How would you investigate a 15% DAU decline for a mobile app?',
     intent: 'Assess hypothesis formulation and metric segmentation',
+    expectedAnswerCharacteristics: [
+      'Decomposes decline by cohorts and platforms',
+      'Formulates testable hypotheses',
+      'Analyzes trade-offs and action plan',
+    ],
     difficulty: 'intermediate',
-    timeAllocationSeconds: 180,
+    recommendedDurationSeconds: 180,
     expectedSignals: ['metric decomposition', 'cohort segmentation', 'hypothesis formulation', 'trade-off analysis'],
   };
 
   const sampleContract: InterviewContract = {
-    id: 'contract_test',
     sessionId: 'ses_test',
     createdAt: new Date().toISOString(),
     mode: 'jd_matched',
-    totalDurationSeconds: 1200,
-    targetRole: 'Senior Product Manager',
-    company: 'Acme Corp',
+    durationSeconds: 1200,
     criticalCompetencies: ['Product Analytics & Metrics', 'Product Strategy & Roadmap'],
     optionalCompetencies: ['Cross-functional Execution'],
-    questionBudget: { min: 5, max: 15 },
-    timeBudget: { openingSeconds: 120, coreAssessmentSeconds: 600, gapProbingSeconds: 360, closingSeconds: 120 },
+    minQuestions: 5,
+    maxQuestions: 15,
+    timeBudget: { opening: 120, coreAssessment: 600, gapProbing: 360, closing: 120 },
     maxFollowUpsPerTopic: 2,
+    minimumEvidenceTargets: 3,
   };
 
   // ─── Scenario 1: Relevant Answer Classification ───────────────────────────

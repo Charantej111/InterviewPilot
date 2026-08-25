@@ -596,7 +596,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
     } else {
       openingQ = {
-        id: `q_${Date.now()}_1`,
+        id: crypto.randomUUID(),
         order: 1,
         type: 'initial',
         questionType: 'resume_deep_dive',
@@ -639,7 +639,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         questions: questionsToUse,
       });
 
-      const firstQ = questionsToUse[0];
+      const firstQ = (session.questions && session.questions.length > 0) ? session.questions[0] : questionsToUse[0];
       const initialTurn: ActiveInterviewTurn = {
         turnId: `turn_${Date.now()}_0`,
         questionId: firstQ.id,
@@ -653,6 +653,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       const enrichedSession: InterviewSession = {
         ...session,
+        currentQuestionId: firstQ.id,
         interviewContract: contract,
         competencyMap: initialCompetencyMap,
         currentObjective: openingObjective,
@@ -695,6 +696,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         interviewStyle: setupDraft.interviewStyle,
         mode,
         questions: questionsToUse,
+        currentQuestionId: firstQ.id,
         status: 'in_progress',
         sessionStatus: 'active',
         turnState: mode === 'voice' ? 'interviewer_speaking' : 'candidate_listening',
@@ -857,9 +859,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             setEngineState('asking');
           }
         },
-        onSpeechEnd: async (_speaker, finalTranscript) => {
+        onSpeechEnd: async (speaker, finalTranscript) => {
           // Handled authoritatively by silence detection and manual finish answer buttons
-          console.log('[VoiceMode] Candidate finished utterance:', finalTranscript);
+          if (speaker === 'candidate') {
+            console.log('[VoiceMode] Candidate finished utterance:', finalTranscript || '(voice audio)');
+          }
         },
         onAnswerAutoCompleted: async (finalAnswer) => {
           if (finalAnswer && finalAnswer.trim().length >= 5) {
@@ -997,10 +1001,34 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       try {
         let answerId = `ans_${Date.now()}`;
         
-        // Assert valid UUID on questionId
+        // Assert and recover valid UUID on questionId
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(updatedTurn.questionId)) {
-          throw new Error(`PersistenceContractError: Question ID "${updatedTurn.questionId}" is not a valid UUID.`);
+        let targetQuestionId = updatedTurn.questionId;
+
+        if (!uuidRegex.test(targetQuestionId)) {
+          const matchingQ = activeSession.questions?.find(q => q.id === targetQuestionId) ||
+            activeSession.questions?.[activeSession.currentQuestionIndex || 0] ||
+            activeSession.questions?.[0];
+
+          if (matchingQ && uuidRegex.test(matchingQ.id)) {
+            console.warn(`[InterviewPersistence] Recovered valid question UUID "${matchingQ.id}" for turn "${updatedTurn.turnId}" (was "${targetQuestionId}")`);
+            targetQuestionId = matchingQ.id;
+            updatedTurn.questionId = matchingQ.id;
+          } else if (matchingQ) {
+            const newUuid = crypto.randomUUID();
+            console.warn(`[InterviewPersistence] Assigned new UUID "${newUuid}" to question "${matchingQ.id}"`);
+            matchingQ.id = newUuid;
+            targetQuestionId = newUuid;
+            updatedTurn.questionId = newUuid;
+          } else {
+            const newUuid = crypto.randomUUID();
+            targetQuestionId = newUuid;
+            updatedTurn.questionId = newUuid;
+          }
+        }
+
+        if (!uuidRegex.test(targetQuestionId)) {
+          throw new Error(`PersistenceContractError: Question ID "${targetQuestionId}" is not a valid UUID.`);
         }
 
         // Persist Answer to Database
@@ -1008,7 +1036,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const res = await interviewService.submitAnswer(
             user.id,
             activeSession.id,
-            updatedTurn.questionId,
+            targetQuestionId,
             answerText,
             inputMode,
             durationSecs,
@@ -1018,7 +1046,7 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
 
         // Run Answer Evaluation
-        const currentQ = activeSession.questions?.find(q => q.id === updatedTurn.questionId) || activeSession.questions?.[activeSession.currentQuestionIndex];
+        const currentQ = activeSession.questions?.find(q => q.id === targetQuestionId) || activeSession.questions?.[activeSession.currentQuestionIndex];
         if (!currentQ) {
           throw new Error('Question data not found for evaluation');
         }
@@ -1200,7 +1228,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         // Assert valid UUID on persisted question ID
         if (!uuidRegex.test(dynamicNextQ.id)) {
-          throw new Error(`PersistenceContractError: Question ID "${dynamicNextQ.id}" is not a valid UUID.`);
+          const fallbackUuid = crypto.randomUUID();
+          console.warn(`[InterviewPersistence] Assigned fallback UUID "${fallbackUuid}" to dynamic question "${dynamicNextQ.id}"`);
+          dynamicNextQ = { ...dynamicNextQ, id: fallbackUuid };
         }
 
         const nextSessionStatus = nextObjective.questionType === 'closing' ? 'closing' as const : 'active' as const;

@@ -33,8 +33,10 @@ function shouldBypassEdgeFunctions(): boolean {
   }
 }
 
-async function getEdgeErrorMessage(error: any, functionName?: string): Promise<string> {
-  if (!error) return 'Unknown error';
+async function getEdgeErrorMessage(error: any, functionName?: string, data?: any): Promise<string> {
+  if (!error && !data) return `[EdgeFunction] Function "${functionName || 'unknown'}" returned empty response.`;
+  if (!error && data?.error) return `[EdgeFunction] Function "${functionName || 'unknown'}" returned error: ${typeof data.error === 'string' ? data.error : JSON.stringify(data.error)}`;
+  if (!error) return `[EdgeFunction] Function "${functionName || 'unknown'}" returned unexpected payload.`;
   const name = error.name || 'Error';
   const status = error.status || error.context?.status || 'N/A';
   let details = '';
@@ -394,7 +396,7 @@ ${structuredBlocksText}
           }
           return profile;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'analyze-resume');
+        const errDetail = await getEdgeErrorMessage(error, 'analyze-resume', data);
         if (errDetail?.includes('not a valid candidate resume')) {
           throw new Error(errDetail);
         }
@@ -521,7 +523,7 @@ Return JSON strictly matching this schema:
         if (!error && (data?.jdEvidenceModel || data?.jobProfile)) {
           rawModel = data.jdEvidenceModel || data.jobProfile;
         } else {
-          const errDetail = await getEdgeErrorMessage(error, 'analyze-jd');
+          const errDetail = await getEdgeErrorMessage(error, 'analyze-jd', data);
           console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
         }
       } catch (edgeErr) {
@@ -606,7 +608,7 @@ Return ONLY valid JSON matching this schema:
         if (!error && data?.companyResearch) {
           return data.companyResearch;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'research-company');
+        const errDetail = await getEdgeErrorMessage(error, 'research-company', data);
         console.warn('Supabase research-company Edge Function warning, cascading to client AI engine:', errDetail);
       } catch (edgeErr) {
         console.warn('Supabase research-company invocation failed, cascading to client AI engine:', edgeErr);
@@ -719,7 +721,7 @@ Return JSON strictly matching this schema:
         if (!error && data?.matchResult) {
           return data.matchResult;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'match-analysis');
+        const errDetail = await getEdgeErrorMessage(error, 'match-analysis', data);
         console.warn('Supabase match-analysis Edge Function warning, evaluating with client AI engine:', errDetail);
       } catch (edgeErr) {
         console.warn('Supabase match-analysis invocation failed, evaluating with client AI engine:', edgeErr);
@@ -825,7 +827,7 @@ Return JSON strictly matching this schema:
         if (!error && data?.questions && data.questions.length > 0) {
           return data.questions;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'prepare-interview');
+        const errDetail = await getEdgeErrorMessage(error, 'prepare-interview', data);
         console.warn('Supabase prepare-interview Edge Function warning, cascading to client AI engine:', errDetail);
       } catch (edgeErr) {
         console.warn('Supabase prepare-interview invocation failed, cascading to client AI engine:', edgeErr);
@@ -1276,7 +1278,7 @@ Rules:
         if (!error && data?.feedback) {
           return data.feedback;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'evaluate-answer');
+        const errDetail = await getEdgeErrorMessage(error, 'evaluate-answer', data);
         console.warn('Supabase evaluate-answer Edge Function warning, cascading to client AI engine:', errDetail);
       } catch (edgeErr) {
         console.warn('Supabase evaluate-answer invocation failed, cascading to client AI engine:', edgeErr);
@@ -1617,7 +1619,7 @@ Return JSON strictly matching this schema:
         if (!error && data?.report) {
           return data.report;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'generate-report');
+        const errDetail = await getEdgeErrorMessage(error, 'generate-report', data);
         console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
       } catch (edgeErr) {
         console.info('[aiService] Edge Function unavailable, proceeding with calibrated engine.');
