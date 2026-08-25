@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, X, ArrowRight, LayoutDashboard, User } from 'lucide-react';
+import { Menu, X, ArrowRight, LayoutDashboard, User, LogOut } from 'lucide-react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { ThemeToggle } from './ThemeToggle';
 import { Logo } from '../ui/Logo';
@@ -8,7 +8,7 @@ import { useUser } from '../../context/UserContext';
 export const Navbar: React.FC = () => {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useUser();
+  const { user, isAuthenticated, logout } = useUser();
 
   return (
     <div className="sticky top-4 z-50 w-full px-4 sm:px-6 max-w-4xl mx-auto">
@@ -45,22 +45,33 @@ export const Navbar: React.FC = () => {
         </nav>
 
         {/* Right: Actions */}
-        <div className="hidden md:flex items-center gap-3 shrink-0">
+        <div className="hidden md:flex items-center gap-2.5 shrink-0">
           {isAuthenticated ? (
             <>
               <button
                 onClick={() => navigate('/dashboard')}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground transition-colors px-2.5 py-1"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground-muted hover:text-foreground transition-colors px-2 py-1"
               >
                 <User size={14} className="text-primary" />
                 <span>{user?.name ? user.name.split(' ')[0] : 'Account'}</span>
               </button>
               <button
                 onClick={() => navigate('/setup')}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 shadow-xs active:scale-[0.98] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-100 shadow-xs active:scale-[0.98] transition-colors cursor-pointer"
               >
                 <span>New Interview</span>
                 <ArrowRight size={13} />
+              </button>
+              <button
+                onClick={async () => {
+                  await logout();
+                  navigate('/login');
+                }}
+                title="Sign out"
+                className="p-1.5 rounded-full text-foreground-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                aria-label="Sign out"
+              >
+                <LogOut size={15} />
               </button>
             </>
           ) : (
@@ -140,6 +151,17 @@ export const Navbar: React.FC = () => {
               >
                 <span>New Interview</span>
                 <ArrowRight size={14} />
+              </button>
+              <button
+                className="w-full py-2 rounded-xl text-xs font-semibold text-rose-500 hover:bg-rose-500/10 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                onClick={async () => {
+                  setOpen(false);
+                  await logout();
+                  navigate('/login');
+                }}
+              >
+                <LogOut size={14} />
+                <span>Sign Out</span>
               </button>
             </div>
           ) : (

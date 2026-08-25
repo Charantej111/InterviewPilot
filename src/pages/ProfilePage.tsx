@@ -25,6 +25,7 @@ import {
   AlertCircle,
   Loader2,
   Camera,
+  LogOut,
 } from 'lucide-react';
 
 const APPLE_THEME_AVATARS = [
@@ -51,7 +52,7 @@ const APPLE_THEME_AVATARS = [
 ];
 
 export const ProfilePage: React.FC = () => {
-  const { user, updateProfile } = useUser();
+  const { user, updateProfile, logout } = useUser();
   const { setupDraft, uploadResumeFile } = useInterview();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -166,14 +167,28 @@ export const ProfilePage: React.FC = () => {
             </p>
           </div>
 
-          <Button
-            size="md"
-            onClick={() => handleSaveProfile()}
-            leftIcon={isSaved ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Save size={16} />}
-            className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-lg shadow-primary/20 self-start sm:self-auto cursor-pointer"
-          >
-            {isSaved ? 'Changes Saved!' : 'Save Profile'}
-          </Button>
+          <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={async () => {
+                await logout();
+                navigate('/login');
+              }}
+              leftIcon={<LogOut size={15} />}
+              className="text-foreground-muted hover:text-rose-500 hover:border-rose-500/30 hover:bg-rose-500/10 font-bold text-xs cursor-pointer"
+            >
+              Sign Out
+            </Button>
+            <Button
+              size="md"
+              onClick={() => handleSaveProfile()}
+              leftIcon={isSaved ? <CheckCircle2 size={16} className="text-emerald-400" /> : <Save size={16} />}
+              className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-lg shadow-primary/20 cursor-pointer"
+            >
+              {isSaved ? 'Changes Saved!' : 'Save Profile'}
+            </Button>
+          </div>
         </div>
 
         {/* Profile Identity Hero Card with Inline Avatar Selection */}

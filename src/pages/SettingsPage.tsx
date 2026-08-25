@@ -22,11 +22,12 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  LogOut,
 } from 'lucide-react';
 import { Theme } from '../types/theme';
 
 export const SettingsPage: React.FC = () => {
-  const { user, preferences, updateProfile, updatePreferences } = useUser();
+  const { user, preferences, updateProfile, updatePreferences, logout } = useUser();
   const { theme, setTheme } = useTheme();
   const { setupDraft, uploadResumeFile } = useInterview();
   const navigate = useNavigate();
@@ -445,6 +446,31 @@ export const SettingsPage: React.FC = () => {
               <p className="text-xs text-foreground-muted leading-relaxed">
                 Your uploaded resumes, job descriptions, audio recordings, and evaluation rubrics are isolated strictly to your candidate session and never used to train foundation models.
               </p>
+            </div>
+
+            <div className="p-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-foreground">
+                    Account Authentication Session
+                  </h4>
+                  <p className="text-xs text-foreground-muted leading-relaxed">
+                    Signed in as <span className="font-semibold text-foreground">{user.email || 'Candidate'}</span>
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    await logout();
+                    navigate('/login');
+                  }}
+                  leftIcon={<LogOut size={13} />}
+                  className="text-foreground-muted hover:text-rose-500 hover:border-rose-500/30 hover:bg-rose-500/10 font-bold text-xs self-start sm:self-auto cursor-pointer"
+                >
+                  Sign Out
+                </Button>
+              </div>
             </div>
 
             <div className="p-6 rounded-2xl border border-rose-500/20 bg-rose-500/5 space-y-3">

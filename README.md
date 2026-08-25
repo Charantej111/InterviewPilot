@@ -4,17 +4,17 @@
   <img src="public/logo.png" width="96" height="96" alt="InterviewPilot Logo" />
   <h2>InterviewPilot — Adaptive AI Mock Interview Simulation Engine</h2>
   <p><strong>Practice the interview you’re actually going to face.</strong></p>
-  <p>Role-scoped resume grounding, deterministic competency maps, conversational voice interview room, and STAR rubric evaluations with executive PDF dossiers.</p>
+  <p>Hyper-calibrated mock interview loops grounded in your resume, target role, and job description with deterministic competency tracking, conversational voice mode, and auditable STAR scoring.</p>
 
   <p>
-    <img src="https://img.shields.io/badge/React-19.0-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" />
-    <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Vite-6.4-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite 6" />
-    <img src="https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white" alt="TailwindCSS" />
-    <img src="https://img.shields.io/badge/Supabase-Database%20%26%20Edge%20Functions-3ECF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase" />
-    <img src="https://img.shields.io/badge/Gemini%202.0-Flash%20%26%20Live%20Voice-8E75FF?style=flat-square&logo=google&logoColor=white" alt="Gemini" />
-    <img src="https://img.shields.io/badge/Tests-257%20Passed%20(100%25)-brightgreen?style=flat-square" alt="257 Tests Passed" />
-    <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
+    <img src="https://img.shields.io/badge/React-19.0-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 19" />
+    <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/Vite-6.4-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite 6" />
+    <img src="https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="TailwindCSS" />
+    <img src="https://img.shields.io/badge/Supabase-Database%20%26%20Edge%20Functions-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase" />
+    <img src="https://img.shields.io/badge/Gemini%202.0-Flash%20%26%20Live%20Voice-8E75FF?style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
+    <img src="https://img.shields.io/badge/Tests-257%20Passed%20(100%25)-brightgreen?style=for-the-badge" alt="257 Tests Passed" />
+    <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License" />
   </p>
 </div>
 
@@ -22,13 +22,27 @@
 
 ## ⚡ Overview
 
-**InterviewPilot** is a production-grade AI mock interview platform that replaces generic interview questions with hyper-calibrated, role-scoped simulations. Built with a deterministic **Interview Brain**, InterviewPilot isolates target role rubrics from raw resume claims to ensure zero AI hallucinations, delivers conversational voice mode with live telemetry, and calculates mathematical answer scores without hardcoded bias.
+**InterviewPilot** is a production-grade AI mock interview platform that eliminates generic, cookie-cutter practice questions. Built with a deterministic **Interview Brain**, InterviewPilot isolates target role rubrics from raw resume claims to ensure zero AI hallucinations, delivers conversational voice simulations with live telemetry, and calculates mathematical answer scores without hardcoded bias.
+
+```mermaid
+flowchart LR
+    A[📄 Resume PDF] --> B[Spatial PDF.js Parser]
+    C[🎯 Target Role / JD] --> D[Role Scoping Engine]
+    B --> E[Interview Contract & Competency Map]
+    D --> E
+    E --> F[Deterministic Brain State Machine]
+    F --> G[Live Voice / Text Cockpit]
+    G --> H[Deterministic Answer Evaluator]
+    H --> I[Information Gain & State Transition]
+    I --> F
+    H --> J[Executive PDF Dossier]
+```
 
 ---
 
 ## 🏛️ Core Architectural Pillars
 
-### 1. 🎯 Role-Scoped Resume Grounding
+### 1. 🎯 Role-Scoped Resume Grounding & Archetype Isolation
 ```
 TARGET ROLE + RESUME EVIDENCE
         ↓
@@ -164,11 +178,15 @@ InterviewPilot/
 ## 🧪 Testing & Verification
 
 InterviewPilot includes a comprehensive regression test suite with **257 automated test scenarios**:
-- **Phase 1 & 2:** 2-Column PDF Spatial Parsing, Section Boundary Extraction, and JD Match Analysis.
-- **Phase 3:** Interview Contract Bounded Constraints, Time Budgeting, Competency Map Transitions, and Information Gain.
-- **Phase 4:** Deterministic Answer Intelligence, Relevance Gating, and Normalized Weighted Math.
-- **Phase 5:** Voice Safety Reducers, Interruption Handling, and Lifecycle State Transitions.
-- **Role-Scoped Grounding:** Archetype Classification, Domain Isolation, and Zero-Hallucination Opening Objectives.
+
+| Test Group | Scenarios | Focus Areas |
+|---|---|---|
+| **Phase 1 & 2** | 48 tests | 2-Column PDF Spatial Parsing, Section Boundary Extraction, JD Match Analysis |
+| **Phase 3** | 34 tests | Interview Contract Bounded Constraints, Time Budgeting, Competency Map Transitions, Information Gain |
+| **Phase 4** | 43 tests | Deterministic Answer Intelligence, Relevance Gating, Normalized Weighted Math |
+| **Phase 5** | 64 tests | Voice Safety Reducers, Interruption Handling, Lifecycle State Transitions |
+| **Role-Scoped Grounding** | 33 tests | Archetype Classification, Domain Isolation, Zero-Hallucination Opening Objectives |
+| **Integrity & Security** | 35 tests | Stale Hash Invalidation, Tab-Switch Cheating Detection, Rate-Limited Auth |
 
 Run all tests:
 ```bash

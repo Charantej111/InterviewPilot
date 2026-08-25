@@ -1,5 +1,5 @@
 import React, { useState, type ReactNode } from 'react';
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, 
@@ -9,7 +9,8 @@ import {
   Menu, 
   X,
   ChevronRight,
-  Plus
+  Plus,
+  LogOut
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { Logo } from '../ui/Logo';
@@ -31,8 +32,9 @@ export interface AppShellProps {
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const { resetSetupDraft } = useInterview();
-  const { user } = useUser();
+  const { user, logout } = useUser();
   const displayName = user.name || (user.email ? user.email.split('@')[0] : 'Candidate');
 
   return (
@@ -78,21 +80,34 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             <ThemeToggle size="sm" />
           </div>
 
-          {/* User Profile Card */}
-          <Link
-            to="/profile"
-            className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors group"
-          >
-            <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="font-bold text-foreground text-xs leading-tight truncate group-hover:text-primary transition-colors">
-                {displayName}
-              </span>
-              <span className="text-[10px] text-foreground-muted truncate">
-                {user.targetRole || 'Candidate'}
-              </span>
-            </div>
-          </Link>
+          {/* User Profile Card & Sign Out */}
+          <div className="flex items-center justify-between gap-1 p-1 rounded-xl hover:bg-surface-subtle transition-colors group">
+            <Link
+              to="/profile"
+              className="flex items-center gap-2.5 min-w-0 flex-1"
+            >
+              <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="font-bold text-foreground text-xs leading-tight truncate group-hover:text-primary transition-colors">
+                  {displayName}
+                </span>
+                <span className="text-[10px] text-foreground-muted truncate">
+                  {user.targetRole || 'Candidate'}
+                </span>
+              </div>
+            </Link>
+            <button
+              onClick={async () => {
+                await logout();
+                navigate('/login');
+              }}
+              title="Sign out"
+              className="p-1.5 rounded-lg text-foreground-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer shrink-0"
+              aria-label="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -120,6 +135,17 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             <Link to="/profile">
               <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
             </Link>
+            <button
+              onClick={async () => {
+                await logout();
+                navigate('/login');
+              }}
+              title="Sign out"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-foreground-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+            >
+              <LogOut size={14} />
+              <span className="hidden lg:inline">Sign Out</span>
+            </button>
           </div>
         </header>
 
@@ -231,17 +257,30 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                     <ThemeToggle size="sm" />
                   </div>
 
-                  <Link
-                    to="/profile"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-surface-subtle transition-colors"
-                  >
-                    <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="font-bold text-xs text-foreground truncate">{displayName}</span>
-                      <span className="text-[10px] text-foreground-muted truncate">{user.targetRole || 'Candidate'}</span>
-                    </div>
-                  </Link>
+                  <div className="flex items-center justify-between gap-2 p-1 rounded-xl hover:bg-surface-subtle transition-colors">
+                    <Link
+                      to="/profile"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="flex items-center gap-2.5 min-w-0 flex-1"
+                    >
+                      <Avatar name={displayName} src={user.avatarUrl} size="xs" status="online" />
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="font-bold text-xs text-foreground truncate">{displayName}</span>
+                        <span className="text-[10px] text-foreground-muted truncate">{user.targetRole || 'Candidate'}</span>
+                      </div>
+                    </Link>
+                    <button
+                      onClick={async () => {
+                        setMobileMenuOpen(false);
+                        await logout();
+                        navigate('/login');
+                      }}
+                      title="Sign out"
+                      className="p-2 rounded-lg text-foreground-muted hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    >
+                      <LogOut size={16} />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </>
