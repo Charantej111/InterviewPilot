@@ -102,22 +102,52 @@ export const evaluationService = {
    * Generates a final holistic report for an interview session via Edge Function and saves to Supabase.
    */
   async generateAndSaveFinalReport(userId: string, interviewId: string): Promise<FinalReport> {
-    // 1. Fetch interview details, questions, answers, and evaluations
-    const { data: interview, error: intError } = await supabase
-      .from('interviews')
-      .select(`
-        *,
-        questions:questions!questions_interview_id_fkey (*),
-        answers:answers!answers_interview_id_fkey (*),
-        evaluations:evaluations!evaluations_interview_id_fkey (*)
-      `)
-      .eq('id', interviewId)
-      .eq('user_id', userId)
-      .single();
+    // 1. Fetch interview details, questions, answers, and evaluations with resilient fallback
+    let interview: any = null;
+    try {
+      const { data, error: intError } = await supabase
+        .from('interviews')
+        .select(`
+          *,
+          questions:questions!questions_interview_id_fkey (*),
+          answers:answers!answers_interview_id_fkey (*),
+          evaluations:evaluations!evaluations_interview_id_fkey (*)
+        `)
+        .eq('id', interviewId)
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (intError || !interview) {
-      console.error('Error fetching interview for final report:', intError);
-      throw new Error(`Interview not found: ${intError?.message}`);
+      if (intError || !data) {
+        // Fallback: Query interview without explicit foreign key constraint syntax
+        const { data: rawInterview, error: rawError } = await supabase
+          .from('interviews')
+          .select('*')
+          .eq('id', interviewId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (rawError || !rawInterview) {
+          throw new Error(`Interview not found: ${intError?.message || rawError?.message}`);
+        }
+
+        const [qRes, aRes, eRes] = await Promise.all([
+          supabase.from('questions').select('*').eq('interview_id', interviewId),
+          supabase.from('answers').select('*').eq('interview_id', interviewId),
+          supabase.from('evaluations').select('*').eq('interview_id', interviewId),
+        ]);
+
+        interview = {
+          ...rawInterview,
+          questions: qRes.data || [],
+          answers: aRes.data || [],
+          evaluations: eRes.data || [],
+        };
+      } else {
+        interview = data;
+      }
+    } catch (fetchErr: any) {
+      console.error('Error fetching interview for final report:', fetchErr);
+      throw fetchErr;
     }
 
     // 2. Return existing report immediately if already synthesized (Idempotent cache)

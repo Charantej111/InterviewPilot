@@ -336,7 +336,13 @@ export const DashboardPage: React.FC = () => {
               {recentInterviews.map((session) => (
                 <div
                   key={session.id}
-                  onClick={() => navigate(`/interview/${session.id}/report`)}
+                  onClick={() => {
+                    if (session.status === 'in_progress') {
+                      navigate(`/interview/${session.id}`);
+                    } else {
+                      navigate(`/interview/${session.id}/report`);
+                    }
+                  }}
                   className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-4">

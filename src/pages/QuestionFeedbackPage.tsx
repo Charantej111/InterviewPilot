@@ -31,7 +31,11 @@ export const QuestionFeedbackPage: React.FC = () => {
   const fb = latestFeedback || storedFeedback;
 
   const handleContinue = async () => {
-    navigate(`/interview/${id || activeSession.id}/report`);
+    if (currentQNum < totalQNum && activeSession.status === 'in_progress') {
+      navigate(`/interview/${id || activeSession.id}`);
+    } else {
+      navigate(`/interview/${id || activeSession.id}/report`);
+    }
   };
 
   if (!fb) {

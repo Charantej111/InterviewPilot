@@ -1402,25 +1402,50 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !targetSessionId.startsWith('sess_acme')) {
       try {
         const report = await evaluationService.generateAndSaveFinalReport(user.id, targetSessionId);
-        setFinalReport(report);
-        return report;
+        if (report && report.overallScore !== undefined) {
+          setFinalReport(report);
+          return report;
+        }
       } catch (err) {
         console.warn('generateAndSaveFinalReport encountered issue, falling back to direct report synthesis:', err);
       }
     }
 
+    // Resolve target session details
+    let sessionData = activeSession;
+    if (sessionId && sessionId !== activeSession.id) {
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+        try {
+          const loaded = await interviewService.getSessionById(user.id, sessionId);
+          if (loaded) {
+            sessionData = loaded;
+            setActiveSession(loaded);
+          }
+        } catch (loadErr) {
+          console.warn('getSessionById in getReport notice:', loadErr);
+        }
+      }
+      if (sessionData.id !== sessionId) {
+        const saved = storage.get<InterviewSession | null>('current_session', null);
+        if (saved && saved.id === sessionId) {
+          sessionData = saved;
+          setActiveSession(saved);
+        }
+      }
+    }
+
     const report = await aiService.generateFinalReport({
       interviewId: targetSessionId,
-      role: activeSession.jobTitle,
-      company: activeSession.company,
-      questions: activeSession.questions,
-      answers: activeSession.answers,
-      evaluations: Object.values(activeSession.feedbacks || {}),
+      role: sessionData.jobTitle || 'Target Role',
+      company: sessionData.company || 'Target Company',
+      questions: sessionData.questions || [],
+      answers: sessionData.answers || {},
+      evaluations: Object.values(sessionData.feedbacks || {}),
     });
 
     setFinalReport(report);
     return report;
-  }, [isAuthenticated, user?.id, activeSession.id, activeSession.jobTitle, activeSession.company, activeSession.questions, activeSession.answers, activeSession.feedbacks]);
+  }, [isAuthenticated, user?.id, activeSession]);
 
   const terminateActiveSession = async () => {
     setActiveSession((prev) => {

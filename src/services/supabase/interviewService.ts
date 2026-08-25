@@ -174,20 +174,51 @@ export const interviewService = {
    * Loads an interview session with all questions, answers, and evaluations.
    */
   async getSessionById(userId: string, sessionId: string): Promise<InterviewSession | null> {
-    const { data, error } = await supabase
-      .from('interviews')
-      .select(`
-        *,
-        questions:questions!questions_interview_id_fkey (*),
-        answers:answers!answers_interview_id_fkey (*),
-        evaluations:evaluations!evaluations_interview_id_fkey (*)
-      `)
-      .eq('id', sessionId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    let data: any = null;
+    try {
+      const { data: joinedData, error: joinError } = await supabase
+        .from('interviews')
+        .select(`
+          *,
+          questions:questions!questions_interview_id_fkey (*),
+          answers:answers!answers_interview_id_fkey (*),
+          evaluations:evaluations!evaluations_interview_id_fkey (*)
+        `)
+        .eq('id', sessionId)
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (error || !data) {
-      console.error('Error fetching session by ID:', error);
+      if (joinError || !joinedData) {
+        // Fallback: Query interview, questions, answers, evaluations independently
+        const { data: rawData, error: rawError } = await supabase
+          .from('interviews')
+          .select('*')
+          .eq('id', sessionId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (rawError || !rawData) {
+          console.error('Error fetching session by ID:', joinError || rawError);
+          return null;
+        }
+
+        const [qRes, aRes, eRes] = await Promise.all([
+          supabase.from('questions').select('*').eq('interview_id', sessionId),
+          supabase.from('answers').select('*').eq('interview_id', sessionId),
+          supabase.from('evaluations').select('*').eq('interview_id', sessionId),
+        ]);
+
+        data = {
+          ...rawData,
+          questions: qRes.data || [],
+          answers: aRes.data || [],
+          evaluations: eRes.data || [],
+        };
+      } else {
+        data = joinedData;
+      }
+    } catch (err) {
+      console.error('Exception fetching session by ID:', err);
       return null;
     }
 

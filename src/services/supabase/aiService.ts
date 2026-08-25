@@ -1611,18 +1611,24 @@ Return JSON strictly matching this schema:
   }): Promise<FinalReport> {
     const apiKey = getClientApiKey();
 
-    // 1. Try Supabase Edge Function
+    // 1. Try Supabase Edge Function with 4s timeout
     if (!shouldBypassEdgeFunctions()) {
       try {
-        const { data, error } = await supabase.functions.invoke('generate-report', {
+        const invokePromise = supabase.functions.invoke('generate-report', {
           body: { ...params, apiKey },
         });
+        const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: new Error('Edge function timeout') }), 4000)
+        );
+        const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
 
         if (!error && data?.report) {
           return data.report;
         }
-        const errDetail = await getEdgeErrorMessage(error, 'generate-report', data);
-        console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
+        if (error && error.message !== 'Edge function timeout') {
+          const errDetail = await getEdgeErrorMessage(error, 'generate-report', data);
+          console.info('[aiService] Edge Function quota/status notice (falling back to calibrated engine):', errDetail.split('\n')[0]);
+        }
       } catch (edgeErr) {
         console.info('[aiService] Edge Function unavailable, proceeding with calibrated engine.');
       }
@@ -1730,7 +1736,7 @@ Return JSON strictly matching this schema:
 }
 `;
 
-      const synthesis = await callClientGeminiStructured<{
+      const geminiPromise = callClientGeminiStructured<{
         summary: string;
         topStrengths: string[];
         priorityImprovements: string[];
@@ -1740,6 +1746,10 @@ Return JSON strictly matching this schema:
         'You are an executive hiring bar chair. Synthesize honest, calibrated candidate assessments with high-value coaching drills.',
         { apiKey }
       );
+      const geminiTimeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Client Gemini timeout')), 4500)
+      );
+      const synthesis = await Promise.race([geminiPromise, geminiTimeout]);
 
       return {
         id: `rep_${interviewId || crypto.randomUUID()}`,

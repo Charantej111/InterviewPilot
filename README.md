@@ -1,17 +1,20 @@
 # ✦ InterviewPilot
 
 <div align="center">
-  <img src="public/logo.png" width="84" height="84" alt="InterviewPilot Logo" />
-  <h3>Practice the interview you’re actually going to face.</h3>
-  <p>AI-powered mock interview SaaS tailored to your exact resume, target role, and job description with adaptive follow-ups and rubric-based evaluations.</p>
+  <img src="public/logo.png" width="96" height="96" alt="InterviewPilot Logo" />
+  <h2>InterviewPilot — Adaptive AI Mock Interview Simulation Engine</h2>
+  <p><strong>Practice the interview you’re actually going to face.</strong></p>
+  <p>Role-scoped resume grounding, deterministic competency maps, conversational voice interview room, and STAR rubric evaluations with executive PDF dossiers.</p>
 
   <p>
     <img src="https://img.shields.io/badge/React-19.0-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" />
     <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Vite-6.2-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite" />
+    <img src="https://img.shields.io/badge/Vite-6.4-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite 6" />
     <img src="https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white" alt="TailwindCSS" />
-    <img src="https://img.shields.io/badge/Three.js%20%2F%20OGL-WebGL-black?style=flat-square&logo=three.js&logoColor=white" alt="WebGL" />
-    <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
+    <img src="https://img.shields.io/badge/Supabase-Database%20%26%20Edge%20Functions-3ECF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase" />
+    <img src="https://img.shields.io/badge/Gemini%202.0-Flash%20%26%20Live%20Voice-8E75FF?style=flat-square&logo=google&logoColor=white" alt="Gemini" />
+    <img src="https://img.shields.io/badge/Tests-257%20Passed%20(100%25)-brightgreen?style=flat-square" alt="257 Tests Passed" />
+    <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="License" />
   </p>
 </div>
 
@@ -19,20 +22,45 @@
 
 ## ⚡ Overview
 
-**InterviewPilot** is a next-generation AI mock interview platform designed to replace generic, cookie-cutter interview prep with realistic, hyper-personalized practice loops. Candidates paste their target job description and attach their resume to get an instant hiring bar calibration, role-specific adaptive questions, real-time voice recording telemetry, and multidimensional STAR rubric scoring.
+**InterviewPilot** is a production-grade AI mock interview platform that replaces generic interview questions with hyper-calibrated, role-scoped simulations. Built with a deterministic **Interview Brain**, InterviewPilot isolates target role rubrics from raw resume claims to ensure zero AI hallucinations, delivers conversational voice mode with live telemetry, and calculates mathematical answer scores without hardcoded bias.
 
 ---
 
-## ✨ Key Features
+## 🏛️ Core Architectural Pillars
 
-- **⚡ Instant AI Calibration Cockpit:** Paste target JD and attach resume to deconstruct required competencies, seniority benchmarks, and formulate tailored interview loops.
-- **💬 Animated AI Chat Input:** Frosted glass chat input with a razor-thin 1px 360° rotating conic border beam, file attachment chips, and `⌘K` quick prompt drawers.
-- **🎙️ Studio-Grade AI Voice Input:** Real-time voice recording cockpit with center-weighted harmonic soundwave visualizers, live `mm:ss` counter, and dynamic pacing telemetry (WPM).
-- **🔮 3D Glowing Plasma Sphere Letter Loader:** Atmospheric WebGL/CSS plasma sphere with luminous organic wave typography and progressive multi-stage AI reasoning stream.
-- **🌌 Immersive Dark Gradient AI Cockpit:** Atmospheric background with skewed cyan light streaks, radial vignette, and subtle dot grid matrix.
-- **📊 4-Dimension STAR Rubric Scoring:** Comprehensive evaluation across Structure (STAR), Technical Depth, Quantitative Evidence, and Communication Delivery.
-- **🎛️ Bespoke Custom Dropdowns:** Zero native browser `<select>` elements—all selectors use floating glassmorphic popovers with checkmark indicators and subtitle descriptions.
-- **🌓 Dual Theme Architecture:** High-contrast obsidian dark mode and crisp modern light mode with seamless theme toggling.
+### 1. 🎯 Role-Scoped Resume Grounding
+```
+TARGET ROLE + RESUME EVIDENCE
+        ↓
+ROLE-SCOPED RESUME EVIDENCE
+        ↓
+INTERVIEW COMPETENCIES
+```
+- **Archetype Isolation:** Prevents out-of-scope question drift (e.g., uploading a Developer resume for a **"UI/UX Intern"** role yields canonical UI/UX rubrics like *User Research, Wireframing, and Usability Testing*—with **zero backend or coding questions generated**).
+- **Anti-Hallucination Guard:** If direct evidence is absent for a target role competency, the opening objective formulates an exploratory behavioral question with `useResumeGrounding: false` to eliminate fabricated claims.
+
+### 2. 🧠 Deterministic Interview Brain & Competency Map Engine
+- **Strategy Orchestration:** 100% deterministic TypeScript decision engine (`"What does InterviewPilot need to learn next?"`).
+- **Information Gain Scoring:** Prioritizes critical untested competencies over reliable ones.
+- **Adaptive Difficulty:** Automatically tunes question depth (`foundational` $\leftrightarrow$ `intermediate` $\leftrightarrow$ `advanced`) based on consecutive evaluation performance.
+- **Follow-Up Budgeting:** Enforces strict limits on follow-up probes per competency and exits gracefully with zero filler questions.
+
+### 3. 📊 Deterministic Mathematical Answer Scoring
+- **Auditable Dimensional Formula:**
+  $$\text{Score} = 0.25 \times \text{Relevance} + 0.20 \times \text{Depth} + 0.20 \times \text{Evidence} + 0.15 \times \text{RoleAlignment} + 0.10 \times \text{Structure} + 0.10 \times \text{Clarity}$$
+- **Zero Hallucinated Deductions:** Special gates (irrelevant answers, refusals, clarification requests) are deterministically handled without penalty or score distortion.
+
+### 4. 🎙️ Live Conversational Voice Mode & Speech Telemetry
+- **Barge-In & Interruption Detection:** Allows candidates to speak naturally and interrupt prompts.
+- **Live Telemetry Engine:** Calculates speaking cadence (Words Per Minute), counts verbal crutches (`um`, `uh`, `like`, `you know`, `basically`), and measures pause durations directly from speech transcripts.
+- **Anti-Cheating State Machine:** Monitors tab switching and window focus with warning and termination safeguards.
+
+### 5. 📄 Executive PDF Dossiers & Reports
+- **Print-Perfect Engine (`@media print`):** Formats complete STAR critiques, score breakdowns, delivery telemetry, and developmental coaching drills into executive PDF reports.
+- **Instant Past Session Replay:** Idempotently loads past sessions from Supabase with timeout-protected fallbacks.
+
+### 6. 🎨 Persona Avatars & Apple Emojis
+- **`react-apple-emojis` Integration:** High-resolution Apple emoji avatars across AI, Engineering, Creative, and Leadership personas directly selectable from the profile.
 
 ---
 
@@ -41,10 +69,12 @@
 | Layer | Technologies |
 |---|---|
 | **Core Framework** | [React 19](https://react.dev/), [TypeScript 5.7](https://www.typescriptlang.org/), [Vite 6](https://vitejs.dev/) |
-| **Styling & Design** | [TailwindCSS 3.4](https://tailwindcss.com/), Vanilla CSS Tokens, Linear/Vercel High-Contrast Design System |
-| **Motion & Graphics** | [Framer Motion](https://www.framer.com/motion/), [GSAP](https://greensock.com/gsap/), [Three.js](https://threejs.org/), [OGL](https://github.com/oframe/ogl) |
-| **Icons & Media** | [Lucide React](https://lucide.dev/), Canvas Confetti |
-| **Routing & State** | [React Router 7](https://reactrouter.com/), React Context API, LocalStorage persistence |
+| **Styling & UI** | [TailwindCSS 3.4](https://tailwindcss.com/), High-Contrast Obsidian Dark / Clean Light Mode |
+| **AI Intelligence** | [Google Gemini 2.0 Flash / Pro](https://ai.google.dev/), Deterministic Brain Engine, PDF.js spatial parser |
+| **Voice & Audio** | Web Audio API, Web Speech Recognition, Gemini Live WebSockets |
+| **Database & Auth** | [Supabase](https://supabase.com/) (PostgreSQL, Row Level Security, Edge Functions, Passwordless Email OTP) |
+| **Emoji & Icons** | [react-apple-emojis](https://github.com/dherault/react-apple-emojis), [Lucide React](https://lucide.dev/) |
+| **Testing** | Node.js Test Runner, TypeScript execution via `tsx` (257 regression scenarios) |
 
 ---
 
@@ -52,9 +82,21 @@
 
 ### Prerequisites
 - **Node.js**: `v18.0.0` or higher
-- **npm**: `v9.0.0` or higher (or `pnpm` / `yarn`)
+- **npm**: `v9.0.0` or higher
 
-### Installation
+### Environment Variables
+Create a `.env` file in the root directory:
+
+```env
+# Supabase Configuration
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+# Optional Client-Side Gemini Fallback API Key
+VITE_GEMINI_API_KEY=your-gemini-api-key
+```
+
+### Installation & Run
 
 1. **Clone the repository:**
    ```bash
@@ -73,7 +115,12 @@
    ```
    Open `http://localhost:5173` in your browser.
 
-4. **Build for production:**
+4. **Run the Automated Test Suite:**
+   ```bash
+   npx tsx test/runTests.ts
+   ```
+
+5. **Build for production:**
    ```bash
    npm run build
    ```
@@ -84,40 +131,49 @@
 
 ```text
 InterviewPilot/
-├── public/
-│   └── logo.png                   # Official 4-pointed spark ribbon logo & favicon
+├── public/                        # Brand assets, logos, avatar media
 ├── src/
-│   ├── assets/                    # Bundled brand assets
 │   ├── components/
-│   │   ├── dashboard/             # Dashboard telemetry & skill widgets
-│   │   ├── feedback/              # Metric breakdown & scoring meters
-│   │   ├── interview/             # Live interview simulation cockpit & voice recorder
-│   │   ├── landing/               # Hero, feature grid, STAR framework & pricing
-│   │   ├── layout/                # Navbar capsule, AppShell sidebar, theme toggle, footer
-│   │   ├── reactbits/             # 3D WebGL ColorBends, GradientWaves & 3D Folders
-│   │   ├── report/                # Candidate dossier, action plan & radar charts
-│   │   ├── setup/                 # Calibration steps & resume dropzone
-│   │   └── ui/                    # AnimatedAIChat, CustomDropdown, LetterLoader, Logo, etc.
-│   ├── context/                   # Interview, User, and Theme providers
-│   ├── data/                      # Structured interview data & rubrics
-│   ├── lib/                       # Utilities & storage abstractions
-│   ├── pages/                     # App routing views (Landing, Dashboard, Setup, Room, Report, etc.)
-│   ├── services/                  # AI calibration, evaluation & transcription engines
-│   └── types/                     # TypeScript interfaces and domain types
-├── index.html                     # HTML entry point with Caveat & Plus Jakarta Sans fonts
-├── tailwind.config.js             # Design tokens, color ramps & keyframe animations
-├── tsconfig.json                  # TypeScript configuration
-└── vite.config.ts                 # Vite bundler configuration
+│   │   ├── auth/                  # OTP input, ProtectedRoute guards
+│   │   ├── dashboard/             # Readiness metrics, recent sessions ledger
+│   │   ├── interview/             # Interview room cockpit, question card, voice visualizer
+│   │   ├── landing/               # Hero section, feature grid, pricing
+│   │   ├── layout/                # AppShell, Navbar, AppHeader, Footer
+│   │   ├── report/                # Dossier charts, drills, coaching modals
+│   │   ├── setup/                 # Resume intelligence dropzone, JD calibration
+│   │   └── ui/                    # Avatar, Button, Input, AILoader, CustomCursor
+│   ├── context/                   # InterviewContext, UserContext, ThemeContext
+│   ├── pages/                     # LandingPage, DashboardPage, InterviewRoomPage, FinalReportPage, ProfilePage, SettingsPage
+│   ├── services/
+│   │   ├── ai/                    # interviewBrain, interviewContract, roleScoping, deterministicAnswerEvaluator, answerScoreEngine
+│   │   ├── supabase/              # authService, interviewService, evaluationService, resumeService, profileService
+│   │   └── voice/                 # GeminiLiveVoiceProvider, speech recognition
+│   └── types/                     # TypeScript database, interview, resume, and telemetry schemas
+├── test/                          # 257 automated regression test suites
+│   ├── fixtures/                  # Structural resume and JD fixtures
+│   ├── roleScopedResumeGrounded.test.ts
+│   ├── answerIntelligence.test.ts
+│   ├── deterministicScoring.test.ts
+│   ├── interviewLifecycle.test.ts
+│   └── runTests.ts                # Master test runner
+└── vite.config.ts                 # Vite build configuration
 ```
 
 ---
 
-## 🗺️ Backend Roadmap
+## 🧪 Testing & Verification
 
-- [ ] **AI Calibration Engine:** Ingest full resume PDFs and live scrape job descriptions to generate role-specific competency graphs.
-- [ ] **Adaptive Follow-up Generator:** Dynamic LLM probes based on candidate's live spoken answer depth.
-- [ ] **Whisper Audio Stream:** High-fidelity speech-to-text pipeline with filler word tracking (`um`, `like`, `you know`).
-- [ ] **AI Video / Multi-modal Simulation:** Real-time facial sentiment & eye-contact feedback.
+InterviewPilot includes a comprehensive regression test suite with **257 automated test scenarios**:
+- **Phase 1 & 2:** 2-Column PDF Spatial Parsing, Section Boundary Extraction, and JD Match Analysis.
+- **Phase 3:** Interview Contract Bounded Constraints, Time Budgeting, Competency Map Transitions, and Information Gain.
+- **Phase 4:** Deterministic Answer Intelligence, Relevance Gating, and Normalized Weighted Math.
+- **Phase 5:** Voice Safety Reducers, Interruption Handling, and Lifecycle State Transitions.
+- **Role-Scoped Grounding:** Archetype Classification, Domain Isolation, and Zero-Hallucination Opening Objectives.
+
+Run all tests:
+```bash
+npx tsx test/runTests.ts
+```
 
 ---
 
@@ -128,5 +184,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <div align="center">
-  Built with ❤️ by <a href="https://github.com/Charantej111">Charan Tej</a>
+  Built with ❤️ by <a href="https://charan.ofzen.in/">Charan Tej Neelam</a> · <a href="https://www.linkedin.com/in/charan-tej-neelam-bb0a9a302">LinkedIn</a>
 </div>

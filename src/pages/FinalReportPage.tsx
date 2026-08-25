@@ -24,7 +24,7 @@ import { FinalReport, QuestionBreakdownItem } from '../types/interview';
 export const FinalReportPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { finalReport, getReport, activeSession } = useInterview();
+  const { finalReport, getReport, activeSession, loadSession } = useInterview();
   const [report, setReport] = useState<FinalReport | null>(finalReport || null);
   const [isLoading, setIsLoading] = useState<boolean>(!finalReport || !finalReport.overallScore);
   const [error, setError] = useState<string | null>(null);
@@ -32,10 +32,9 @@ export const FinalReportPage: React.FC = () => {
   const [expandedQuestionIdx, setExpandedQuestionIdx] = useState<number | null>(null);
   const [reattemptQuestion, setReattemptQuestion] = useState<QuestionBreakdownItem | null>(null);
   const [activeDrill, setActiveDrill] = useState<{ title: string; task: string } | null>(null);
-  const hasFetchedIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    let isCurrent = true;
 
     // Route guard check
     if (activeSession && activeSession.id === id) {
@@ -59,25 +58,39 @@ export const FinalReportPage: React.FC = () => {
       return;
     }
 
-    if (hasFetchedIdRef.current === id) return;
-    hasFetchedIdRef.current = id || 'active';
-
     const fetchReport = async () => {
       if (!id) return;
       setIsLoading(true);
       setError(null);
+
+      // Watchdog timer: Guarantee loader resolves within 5 seconds
+      const watchdog = setTimeout(() => {
+        if (isCurrent) {
+          console.warn('[FinalReportPage] Report synthesis watchdog resolving.');
+          const fallback = finalReport || createEmptyReport();
+          setReport(fallback);
+          setIsLoading(false);
+        }
+      }, 5000);
+
       try {
+        if (activeSession.id !== id) {
+          await loadSession(id).catch((e) => console.warn('loadSession notice:', e));
+        }
         const rep = await getReport(id);
-        if (isMounted && rep) {
+        if (isCurrent && rep) {
           setReport(rep);
         }
       } catch (err: any) {
         console.error('Error fetching final report:', err);
-        if (isMounted) {
+        if (isCurrent) {
+          const fallback = finalReport || createEmptyReport();
+          setReport(fallback);
           setError(err?.message || 'Failed to synthesize final report.');
         }
       } finally {
-        if (isMounted) {
+        clearTimeout(watchdog);
+        if (isCurrent) {
           setIsLoading(false);
         }
       }
@@ -85,7 +98,7 @@ export const FinalReportPage: React.FC = () => {
 
     fetchReport();
     return () => {
-      isMounted = false;
+      isCurrent = false;
     };
   }, [id]);
 
