@@ -177,12 +177,12 @@ export function runComprehensive25ScenarioTests(): { passed: number; failed: num
     const cyberCandidate: CandidateProfile = {
       name: 'Alice Security',
       summary: 'Cyber security architect with 6 years experience in SOC operations and SIEM engineering.',
-      skills: ['SIEM Architecture', 'Threat Hunting', 'Penetration Testing', 'Splunk', 'Kernel Security', 'Incident Response'],
+      skills: ['SIEM Architecture', 'Threat Hunting', 'Penetration Testing', 'Splunk', 'Kernel Security', 'Incident Response', 'Network Forensics'],
       experience: [
-        { role: 'Senior Security Engineer', company: 'CyberCorp', duration: '2019 - 2024', highlights: ['Deployed Splunk SIEM for 15,000 endpoints', 'Mitigated 40 critical CVEs'] },
+        { role: 'Senior Security Engineer', company: 'CyberCorp', duration: '2019 - 2024', highlights: ['Deployed Splunk SIEM for 15,000 endpoints', 'Mitigated 40 critical CVEs', 'Architect defense in depth'] },
       ],
       projects: [{ name: 'Threat Hunting Framework', description: 'Automated SIEM threat hunting pipelines with Splunk', technologies: ['Splunk', 'Python'], metrics: 'Reduced MTTD by 45%' }],
-      strengths: ['Threat Hunting', 'SIEM Architecture'],
+      strengths: ['Threat Hunting', 'SIEM Architecture', 'Network Forensics'],
     };
 
     const cyberJD: JobProfile = {

@@ -11,7 +11,18 @@ import { resumeService } from './resumeService';
 
 
 const getClientApiKey = (): string | undefined => {
-  return (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY || undefined;
+  try {
+    const key = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY;
+    if (key) return key;
+  } catch {}
+
+  try {
+    if (typeof process !== 'undefined' && process?.env) {
+      return process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || undefined;
+    }
+  } catch {}
+
+  return undefined;
 };
 
 async function getEdgeErrorMessage(error: any): Promise<string> {
@@ -53,17 +64,20 @@ export const aiService = {
     const extractedDoc = await documentExtractor.extractDocument(file);
 
     // Development-only Observability Logging
-    if (import.meta.env.DEV) {
-      console.groupCollapsed(`[InterviewPilot Extractor] ${file.name}`);
-      console.log('Document Type:', extractedDoc.documentType);
-      console.log('Document Quality:', extractedDoc.documentQuality);
-      console.log('Character Count:', extractedDoc.characterCount);
-      console.log('Sections Detected:', extractedDoc.sections.map((s) => s.normalizedName));
-      if (extractedDoc.extractionWarnings.length > 0) {
-        console.warn('Extraction Warnings:', extractedDoc.extractionWarnings);
+    try {
+      const isDev = new Function('return import.meta.env?.DEV;')();
+      if (isDev) {
+        console.groupCollapsed(`[InterviewPilot Extractor] ${file.name}`);
+        console.log('Document Type:', extractedDoc.documentType);
+        console.log('Document Quality:', extractedDoc.documentQuality);
+        console.log('Character Count:', extractedDoc.characterCount);
+        console.log('Sections Detected:', extractedDoc.sections.map((s) => s.normalizedName));
+        if (extractedDoc.extractionWarnings.length > 0) {
+          console.warn('Extraction Warnings:', extractedDoc.extractionWarnings);
+        }
+        console.groupEnd();
       }
-      console.groupEnd();
-    }
+    } catch {}
 
     // Step 2: Classification Gate (for academic transcripts or course certificates)
     if (['academic_document', 'certificate'].includes(extractedDoc.documentType)) {
@@ -157,14 +171,20 @@ export const aiService = {
   }> {
     const { validateCandidateEvidenceModel } = await import('../ai/evidenceValidator');
 
-    // Build block-structured document representation to preserve project and education boundaries
+    // Build block-structured document representation to preserve project, experience, and education boundaries
     const structuredBlocksText = (extractedDoc?.sections && extractedDoc.sections.length > 0)
       ? (extractedDoc.sections || []).map((sec) => {
           if (sec.normalizedName === 'projects' && extractedDoc?.detectedProjects && extractedDoc.detectedProjects.length > 0) {
-            return `[SECTION: PROJECTS]\n${extractedDoc.detectedProjects.map((p, idx) => `[PROJECT_BLOCK_${idx + 1}]\nHeading: ${p.heading}\nContent:\n${p.lines.join('\n')}\n[/PROJECT_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: PROJECTS]`;
+            return `[SECTION: PROJECTS]\n${extractedDoc.detectedProjects.map((p, idx) => `[PROJECT_BLOCK_${idx + 1}]\nHeading: ${p.heading}${p.link ? `\nLink: ${p.link}` : ''}\nContent:\n${p.lines.join('\n')}\n[/PROJECT_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: PROJECTS]`;
+          }
+          if (sec.normalizedName === 'experience' && extractedDoc?.detectedExperience && extractedDoc.detectedExperience.length > 0) {
+            return `[SECTION: EXPERIENCE]\n${extractedDoc.detectedExperience.map((e, idx) => `[EXPERIENCE_BLOCK_${idx + 1}]\nRole: ${e.role || 'Role'}\nCompany: ${e.company || ''}\nDuration: ${[e.startDate, e.endDate].filter(Boolean).join(' – ')}\nLocation: ${e.location || ''}\nBullets:\n${e.highlights.map((h) => `• ${h}`).join('\n')}\n[/EXPERIENCE_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: EXPERIENCE]`;
           }
           if (sec.normalizedName === 'education' && extractedDoc?.detectedEducation && extractedDoc.detectedEducation.length > 0) {
             return `[SECTION: EDUCATION]\n${extractedDoc.detectedEducation.map((e, idx) => `[EDUCATION_BLOCK_${idx + 1}]\nDegree: ${e.degree || ''}\nInstitution: ${e.institution || ''}\nYear: ${e.year || ''}\nGrade: ${e.grade || ''}\nRaw Text: ${e.lines.join(' | ')}\n[/EDUCATION_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: EDUCATION]`;
+          }
+          if (sec.normalizedName === 'achievements' && extractedDoc?.detectedAchievements && extractedDoc.detectedAchievements.length > 0) {
+            return `[SECTION: ACHIEVEMENTS]\n${extractedDoc.detectedAchievements.map((a, idx) => `[ACHIEVEMENT_BLOCK_${idx + 1}]\n${a.title}\n[/ACHIEVEMENT_BLOCK_${idx + 1}]`).join('\n\n')}\n[/SECTION: ACHIEVEMENTS]`;
           }
           return `[SECTION: ${sec.normalizedName.toUpperCase()}]\n${sec.text}\n[/SECTION: ${sec.normalizedName.toUpperCase()}]`;
         }).join('\n\n')
@@ -172,21 +192,27 @@ export const aiService = {
 
     try {
       const prompt = `
-You are a resume evidence extraction engine.
+You are a strict resume evidence extraction engine.
 Extract only information explicitly supported by the supplied document text and structural blocks.
 
-CRITICAL STRUCTURAL EXTRACTION CONSTRAINTS:
-1. For each [PROJECT_BLOCK_X] in [SECTION: PROJECTS], output EXACTLY ONE object in the "projects" array.
-   - Set "name" to the project Heading.
-   - Place description and bullet sentences inside "problem", "contribution", "technologies", or "outcomes".
-   - NEVER create a separate project object for a bullet line or sentence fragment.
-2. For each [EDUCATION_BLOCK_X] in [SECTION: EDUCATION], output EXACTLY ONE object in the "education" array.
-   - Combine degree, institution, year, and grade from that block into the single education object.
-   - NEVER create separate education objects for CGPA, institution, or degree fragments.
-3. For "workExperience", output ONLY if there is an explicit [SECTION: EXPERIENCE] containing real employer organizations. If empty or absent, return "workExperience": [].
-4. For "skills", output ONLY skills with explicit source text from the resume.
-5. Never invent or complete missing information.
-6. Every single extracted item requires exact supporting "sourceText" from the resume.
+CRITICAL INVARIANTS & STRUCTURAL EXTRACTION CONSTRAINTS:
+1. STRICT 1:1 BLOCK MAPPING:
+   - For each [PROJECT_BLOCK_X] in [SECTION: PROJECTS], output EXACTLY ONE object in the "projects" array.
+     * Set "name" to the project Heading.
+     * Place description and bullet sentences inside "problem", "contribution", "technologies", or "outcomes".
+     * NEVER create a separate project object for a bullet line, continuation sentence, or technology fragment.
+   - For each [EXPERIENCE_BLOCK_X] in [SECTION: EXPERIENCE], output EXACTLY ONE object in the "workExperience" array.
+     * Set "role" and "company" from the block.
+     * NEVER create synthetic placeholder companies like "Organization", "Previous Organization", "Company", "Employer", "[PAGE 21]", or sentence fragments. If no real employer is verified, return null or do not create an experience entry.
+     * NEVER split bullets into separate experiences.
+   - For each [EDUCATION_BLOCK_X] in [SECTION: EDUCATION], output EXACTLY ONE object in the "education" array.
+     * Combine degree, institution, year, and grade from that block into the single education object.
+     * NEVER create separate education objects for CGPA, institution, or degree fragments.
+   - For each [ACHIEVEMENT_BLOCK_X] in [SECTION: ACHIEVEMENTS], output in the "achievements" array. Do NOT convert achievements into work experience or projects.
+2. If [SECTION: EXPERIENCE] is empty or absent, return "workExperience": [].
+3. For "skills", output ONLY skills with explicit source text from the resume. Deduplicate case-insensitively.
+4. Never invent or complete missing information.
+5. Every single extracted item requires exact supporting "sourceText" from the resume.
 
 Return ONLY valid JSON matching this schema:
 {
@@ -458,13 +484,16 @@ Return JSON strictly matching this schema:
   /**
    * Step 3: JD Analyzer
    * Deconstructs a raw job description into structured JDEvidenceModel + backward-compat JobProfile.
-   * Returns { jdEvidenceModel, jobProfile } — callers should store both.
+   * Returns JobProfile with __jdEvidenceModel attached.
    */
   async analyzeJobDescription(title: string, company: string, rawText: string): Promise<JobProfile> {
+    const { validateJDEvidenceModel, deriveJobProfileFromJDEvidence } = await import('../ai/jdValidator');
     const cleanTitle = (title || 'Role').trim();
     const cleanCompany = (company || 'Company').trim();
     const cleanText = (rawText || '').trim();
     const apiKey = getClientApiKey();
+
+    let rawModel: any = null;
 
     // 1. Try Supabase Edge Function
     try {
@@ -472,77 +501,71 @@ Return JSON strictly matching this schema:
         body: { title: cleanTitle, company: cleanCompany, rawText: cleanText, apiKey },
       });
 
-      if (!error && data?.jobProfile) {
-        // Store evidence model on the result for callers that want it
-        const result = data.jobProfile as any;
-        if (data.jdEvidenceModel) {
-          result.__jdEvidenceModel = data.jdEvidenceModel;
-        }
-        return result;
+      if (!error && (data?.jdEvidenceModel || data?.jobProfile)) {
+        rawModel = data.jdEvidenceModel || data.jobProfile;
+      } else {
+        const errDetail = await getEdgeErrorMessage(error);
+        console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
       }
-      const errDetail = await getEdgeErrorMessage(error);
-      console.warn('Supabase analyze-jd Edge Function warning, cascading to client AI engine:', errDetail);
     } catch (edgeErr) {
       console.warn('Supabase analyze-jd invocation failed, cascading to client AI engine:', edgeErr);
     }
 
-
     // 2. Client Gemini Fallback Cascade
-    try {
-      const prompt = `
-Deconstruct the following job description into structured hiring bar requirements for "${cleanTitle}" at "${cleanCompany}".
+    if (!rawModel && cleanText) {
+      try {
+        const prompt = `
+You are a senior hiring committee architect. Deconstruct the following job description into a structured evidence model.
+
+Role: ${cleanTitle}
+Company: ${cleanCompany}
 
 Job Description:
-${cleanText || `${cleanTitle} position at ${cleanCompany}.`}
+${cleanText}
 
-Instructions:
-1. Extract the core responsibilities that define day-to-day execution.
-2. Separate REQUIRED non-negotiable skills from PREFERRED bonus qualifications.
-3. Formulate the precise technical/leadership competencies and key interview evaluation signals.
-4. Extract relevant domain keywords.
+CRITICAL RULES:
+1. For EVERY requirement, include the EXACT phrase or sentence from the JD as "sourceText". Never invent source text.
+2. Classify each requirement's category: "skill", "responsibility", "competency", "technical", "domain", "behavioral", "experience", "education", "certification", "other".
+3. Classify strength: "explicit" (mandatory), "preferred" (optional/bonus), "inferred" (implied).
+4. Flag "critical": true for non-negotiable core skills.
+5. Identify seniority: "intern", "junior", "mid", "senior", "lead", "principal", or "unknown".
+6. Do NOT invent company facts. Extract strictly what is written in the job description.
 
-Return JSON strictly matching this schema:
+Return ONLY valid JSON matching this schema:
 {
   "role": "${cleanTitle}",
   "company": "${cleanCompany}",
-  "responsibilities": string[],
-  "requiredSkills": string[],
-  "preferredSkills": string[],
-  "experienceRequirements": string,
-  "competencies": string[],
-  "keywords": string[],
-  "interviewSignals": string[]
+  "seniority": "intern" | "junior" | "mid" | "senior" | "lead" | "principal" | "unknown",
+  "requiredSkills": [{ "requirement": string, "sourceText": string, "category": "skill", "strength": "explicit", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "preferredSkills": [{ "requirement": string, "sourceText": string, "category": "skill", "strength": "preferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": false }],
+  "responsibilities": [{ "requirement": string, "sourceText": string, "category": "responsibility", "strength": "explicit" | "inferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "competencies": [{ "requirement": string, "sourceText": string, "category": "competency", "strength": "explicit" | "inferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "technicalRequirements": [{ "requirement": string, "sourceText": string, "category": "technical", "strength": "explicit", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "domainKnowledge": [{ "requirement": string, "sourceText": string, "category": "domain", "strength": "explicit" | "preferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "behavioralSignals": [{ "requirement": string, "sourceText": string, "category": "behavioral", "strength": "explicit" | "inferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": false }],
+  "experienceRequirements": [{ "requirement": string, "sourceText": string, "category": "experience", "strength": "explicit", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": boolean }],
+  "educationRequirements": [{ "requirement": string, "sourceText": string, "category": "education", "strength": "explicit" | "preferred", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": false }],
+  "certificationRequirements": [{ "requirement": string, "sourceText": string, "category": "certification", "strength": "preferred" | "explicit", "competencySignal": string, "confidence": "high" | "medium" | "low", "critical": false }],
+  "hiringSignals": string[]
 }
 `;
 
-      return await callClientGeminiStructured<JobProfile>(
-        prompt,
-        'You are a senior hiring committee architect. Deconstruct job postings into precise technical competencies, hiring bar signals, and execution metrics.',
-        { apiKey }
-      );
-    } catch (clientErr) {
-      console.warn('Client Gemini JD analysis fallback, using deterministic extraction:', clientErr);
-      
-      const words = cleanText.split(/\s+/).filter((w) => w.length > 3);
-      return {
-        role: cleanTitle,
-        company: cleanCompany,
-        responsibilities: [
-          `Architect and implement high-performance features for ${cleanTitle}.`,
-          `Collaborate with cross-functional product and engineering teams at ${cleanCompany}.`,
-          'Ensure high code quality, system scalability, and test coverage.',
-        ],
-        requiredSkills: ['Problem Solving', 'System Design', 'Communication', 'Technical Execution'],
-        preferredSkills: ['Leadership', 'Domain Optimization', 'Cross-functional Collaboration'],
-        experienceRequirements: '3+ years relevant engineering experience',
-        competencies: ['First-Principles Thinking', 'System Scalability', 'Execution Discipline'],
-        keywords: Array.from(new Set(words.slice(0, 10))),
-        interviewSignals: [
-          'Demonstrates clear problem decomposition and metric attribution',
-          'Discusses architectural trade-offs under constraints',
-        ],
-      };
+        rawModel = await callClientGeminiStructured<any>(
+          prompt,
+          'You are a senior hiring committee architect. Deconstruct job postings into structured JDEvidenceModel.',
+          { apiKey }
+        );
+      } catch (clientErr) {
+        console.warn('Client Gemini JD analysis fallback, using deterministic extraction:', clientErr);
+      }
     }
+
+    // 3. Pass through deterministic JD Validator
+    const { jdModel } = validateJDEvidenceModel(rawModel, cleanText, cleanTitle, cleanCompany);
+    const derivedJobProfile = deriveJobProfileFromJDEvidence(jdModel);
+    (derivedJobProfile as any).__jdEvidenceModel = jdModel;
+
+    return derivedJobProfile;
   },
 
   /**
@@ -942,128 +965,95 @@ Return JSON strictly matching this schema:
 
   /**
    * Step 6B: Dynamic Opening Question Generator
-   * Uses Gemini to synthesize ONE conversational opening question strictly fulfilling the InterviewObjective.
+   * Executes the first InterviewObjective strictly and validates against anti-hallucination rules.
    */
   async generateOpeningQuestion(params: {
     objective: InterviewObjective;
-    lockedContext: LockedCandidateContext;
+    lockedContext?: LockedCandidateContext | null;
     role: string;
     companyName: string;
     style?: string;
-    difficulty?: 'beginner' | 'intermediate' | 'advanced';
+    difficulty?: 'foundational' | 'intermediate' | 'advanced' | 'beginner';
+    existingQuestions?: Question[];
+    jdEvidenceModel?: import('../../types/jobDescription').JDEvidenceModel | null;
   }): Promise<Question> {
-    const { objective, lockedContext, role, companyName, style = 'realistic', difficulty = 'intermediate' } = params;
+    const { objective, lockedContext, role, companyName, style = 'realistic', existingQuestions = [], jdEvidenceModel } = params;
+    const { validateQuestion, generateFallbackQuestion } = await import('../ai/questionValidator');
     const apiKey = getClientApiKey();
-    const candidateName = lockedContext.derivedProfile.name || 'Candidate';
-    const evidenceSummary = objective.focusEvidenceSummary || JSON.stringify(lockedContext.evidenceModel.projects[0] || lockedContext.evidenceModel.workExperience[0] || {});
+    const evidenceSummary = objective.focusEvidenceSummary || (lockedContext?.evidenceModel ? JSON.stringify(lockedContext.evidenceModel.projects[0] || lockedContext.evidenceModel.workExperience[0] || {}) : 'N/A');
 
     const prompt = `
-You are an executive interviewer conducting a realistic interview for the position of "${role}" at "${companyName}".
-You have selected the following precise diagnostic objective for the opening question:
+You are an executive interviewer conducting a realistic interview for "${role}" at "${companyName}".
+Execute the following diagnostic objective:
 
-INTERVIEW OBJECTIVE:
-- Target Competency: ${objective.targetCompetency}
-- Focus Requirement: ${objective.focusRequirement || 'N/A'}
-- Relevant Candidate Evidence: ${evidenceSummary}
-- Diagnostic Intent: ${objective.reasoning}
-- What to look for: ${objective.lookForSignals.join(', ')}
+OBJECTIVE
+Competency: ${objective.targetCompetency}
+Question type: ${objective.questionType}
+Difficulty: ${objective.difficulty}
+Intent: ${objective.intent}
+Expected signals: ${(objective.expectedSignals || []).join(', ')}
+Resume grounding: ${objective.useResumeGrounding}
+${objective.focusRequirement ? `Target Focus / JD Requirement: ${objective.focusRequirement}` : ''}
+${objective.useResumeGrounding ? `Confirmed Candidate Evidence: ${evidenceSummary}` : ''}
 
-INTERVIEW STYLE & LEVEL:
-- Difficulty Level: ${difficulty}
-- Style: ${style}
-- Candidate Name: ${candidateName}
-
+Style: ${style}
 
 INSTRUCTIONS:
-1. Generate ONE natural, direct opening question that begins the interview and directly targets this objective.
-2. If Candidate Evidence is available, refer naturally to their concrete background or project without reciting robotic metadata.
-3. NEVER generate sample answers, model answers, or answers of any kind.
-4. Formulate clear evaluation criteria with lookFor and redFlags.
+1. Generate exactly ONE natural, direct opening question that starts the interview and strictly executes this objective.
+2. DO NOT reveal the competency name or objective name.
+3. DO NOT reveal expected signals.
+4. DO NOT provide hints, sample answers, or model answers.
+5. DO NOT ask multiple compound questions.
+6. DO NOT fabricate candidate resume evidence.
 
 Return JSON strictly matching this schema:
 {
   "category": "${objective.targetCompetency}",
   "text": string,
-  "intent": "${objective.reasoning}",
+  "intent": "${objective.intent}",
   "contextExplanation": string,
   "expectedSignals": string[],
-  "redFlags": string[],
-  "evaluationCriteria": {
-    "coreCompetency": "${objective.targetCompetency}",
-    "lookFor": string[],
-    "redFlags": string[],
-    "rubricDimensions": ["clarity", "depth", "evidence", "relevance", "structure", "role_alignment"]
-  },
-  "adaptiveFollowUpTriggers": [
-    {
-      "condition": string,
-      "followUpProbe": string
-    }
-  ]
+  "redFlags": string[]
 }
 `;
 
-    try {
-      const generated = await callClientGeminiStructured<any>(
-        prompt,
-        'You are an executive hiring bar interviewer. Formulate grounded, realistic diagnostic questions with zero sample answers.',
-        { apiKey, temperature: 0.3 }
-      );
+    // Maximum 2 dynamic generation attempts before fallback
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const generated = await callClientGeminiStructured<any>(
+          prompt,
+          'You are an executive interviewer. Formulate grounded, realistic diagnostic questions with strictly zero sample answers.',
+          { apiKey, temperature: attempt === 1 ? 0.3 : 0.5 }
+        );
 
-      return {
-        id: `q_${Date.now()}_1`,
-        order: 1,
-        type: 'initial',
-        questionType: 'product_sense',
-        source: 'resume',
-        sourceReference: objective.focusRequirement || objective.targetCompetency,
-        targetCompetency: objective.targetCompetency,
-        category: generated.category || objective.targetCompetency,
-        text: generated.text || `Could you walk me through your experience with ${objective.targetCompetency}, specifically highlighting your role and key outcomes for ${role}?`,
-        intent: generated.intent || objective.reasoning,
-        contextExplanation: generated.contextExplanation || `Opening question targeting ${objective.targetCompetency}.`,
-        expectedSignals: generated.expectedSignals || objective.lookForSignals,
-        redFlags: generated.redFlags || objective.redFlagSignals,
-        expectedAnswerCharacteristics: generated.expectedSignals || objective.lookForSignals,
-        evaluationCriteria: generated.evaluationCriteria || {
-          coreCompetency: objective.targetCompetency,
-          lookFor: objective.lookForSignals,
-          redFlags: objective.redFlagSignals,
-          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
-        },
-        adaptiveFollowUpTriggers: generated.adaptiveFollowUpTriggers || [
-          { condition: 'Candidate does not provide numerical outcome', followUpProbe: 'What was the specific metric lift or outcome?' }
-        ],
-      };
-    } catch (err) {
-      console.warn('Fallback opening question generation:', err);
-      return {
-        id: `q_${Date.now()}_1`,
-        order: 1,
-        type: 'initial',
-        questionType: 'product_sense',
-        source: 'resume',
-        sourceReference: objective.targetCompetency,
-        targetCompetency: objective.targetCompetency,
-        category: objective.targetCompetency,
-        text: `To start off, could you walk me through your work on ${objective.focusRequirement || objective.targetCompetency}? Specifically, what was the core challenge and how did you measure success?`,
-        intent: objective.reasoning,
-        contextExplanation: `Opening probe on ${objective.targetCompetency}`,
-        expectedSignals: objective.lookForSignals,
-        redFlags: objective.redFlagSignals,
-        expectedAnswerCharacteristics: objective.lookForSignals,
-        evaluationCriteria: {
-          coreCompetency: objective.targetCompetency,
-          lookFor: objective.lookForSignals,
-          redFlags: objective.redFlagSignals,
-          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
-        },
-      };
+        const validation = validateQuestion(
+          {
+            ...generated,
+            targetCompetency: objective.targetCompetency,
+            category: generated.category || objective.targetCompetency,
+            difficulty: objective.difficulty,
+          },
+          existingQuestions,
+          objective,
+          lockedContext,
+          jdEvidenceModel
+        );
+
+        if (validation.isValid && validation.validated) {
+          return validation.validated;
+        }
+      } catch (err) {
+        console.warn(`Opening question generation attempt ${attempt} warning:`, err);
+      }
     }
+
+    // Fallback template on validation failure
+    return generateFallbackQuestion(objective, lockedContext, jdEvidenceModel, existingQuestions.length + 1);
   },
 
   /**
    * Step 6C: Dynamic Adaptive Next Question / Follow-Up Generator
+   * Executes the next InterviewObjective strictly and validates against anti-hallucination rules.
    */
   async generateAdaptiveQuestion(params: {
     objective: InterviewObjective;
@@ -1073,8 +1063,23 @@ Return JSON strictly matching this schema:
     companyName: string;
     isFollowUp: boolean;
     style?: string;
+    existingQuestions?: Question[];
+    lockedContext?: LockedCandidateContext | null;
+    jdEvidenceModel?: import('../../types/jobDescription').JDEvidenceModel | null;
   }): Promise<Question> {
-    const { objective, previousQuestionText, candidateAnswerText, role, companyName, isFollowUp, style = 'realistic' } = params;
+    const {
+      objective,
+      previousQuestionText,
+      candidateAnswerText,
+      role,
+      companyName,
+      isFollowUp,
+      style = 'realistic',
+      existingQuestions = [],
+      lockedContext,
+      jdEvidenceModel,
+    } = params;
+    const { validateQuestion, generateFallbackQuestion } = await import('../ai/questionValidator');
     const apiKey = getClientApiKey();
 
     const prompt = `
@@ -1087,84 +1092,70 @@ PREVIOUS QUESTION:
 CANDIDATE'S ACTUAL ANSWER:
 "${candidateAnswerText.slice(0, 1500)}"
 
-NEXT OBJECTIVE TO ASSESS:
-- Target Competency: ${objective.targetCompetency}
-- Is Adaptive Follow-Up on Previous Answer: ${isFollowUp ? 'YES' : 'NO'}
-- Objective Intent: ${objective.reasoning}
-- Look for: ${objective.lookForSignals.join(', ')}
+OBJECTIVE
+Competency: ${objective.targetCompetency}
+Question type: ${objective.questionType}
+Difficulty: ${objective.difficulty}
+Is Adaptive Follow-Up: ${isFollowUp ? 'YES' : 'NO'}
+${objective.followUpReason ? `Follow-Up Reason: ${objective.followUpReason}` : ''}
+Intent: ${objective.intent}
+Expected signals: ${(objective.expectedSignals || []).join(', ')}
+Resume grounding: ${objective.useResumeGrounding}
+${objective.focusEvidenceSummary ? `Candidate Evidence: ${objective.focusEvidenceSummary}` : ''}
+
+Style: ${style}
 
 INSTRUCTIONS:
 1. ${isFollowUp ? 'Formulate a direct, surgical follow-up probe referencing something specific they said (or omitted) to test depth.' : 'Formulate a natural transition and strong question targeting the next competency.'}
-2. Tone: Professional, conversational, ${style}.
-3. STRICT ZERO SAMPLE ANSWER RULE.
+2. DO NOT reveal the competency name or objective name.
+3. DO NOT reveal expected signals.
+4. DO NOT provide hints, sample answers, or model answers.
+5. DO NOT ask multiple compound questions.
+6. DO NOT fabricate candidate resume evidence.
 
 Return JSON strictly matching this schema:
 {
   "category": "${objective.targetCompetency}",
   "text": string,
-  "intent": "${objective.reasoning}",
+  "intent": "${objective.intent}",
   "contextExplanation": string,
   "expectedSignals": string[],
-  "redFlags": string[],
-  "evaluationCriteria": {
-    "coreCompetency": "${objective.targetCompetency}",
-    "lookFor": string[],
-    "redFlags": string[],
-    "rubricDimensions": ["clarity", "depth", "evidence", "relevance", "structure", "role_alignment"]
-  }
+  "redFlags": string[]
 }
 `;
 
-    try {
-      const generated = await callClientGeminiStructured<any>(
-        prompt,
-        'You are an executive interviewer conducting a live conversational loop. Formulate adaptive probes with zero sample answers.',
-        { apiKey, temperature: 0.4 }
-      );
+    // Maximum 2 dynamic generation attempts before fallback
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const generated = await callClientGeminiStructured<any>(
+          prompt,
+          'You are an executive interviewer conducting a live conversational loop. Formulate adaptive probes with strictly zero sample answers.',
+          { apiKey, temperature: attempt === 1 ? 0.3 : 0.5 }
+        );
 
-      return {
-        id: `q_${Date.now()}_${objective.order}`,
-        order: objective.order,
-        type: isFollowUp ? 'follow_up' : 'initial',
-        questionType: isFollowUp ? 'clarification' : 'product_sense',
-        source: isFollowUp ? 'follow_up' : 'job_description',
-        sourceReference: objective.focusRequirement || objective.targetCompetency,
-        targetCompetency: objective.targetCompetency,
-        category: generated.category || objective.targetCompetency,
-        text: generated.text || (isFollowUp ? `Could you give me more detail on the specific trade-offs you made in that scenario?` : `Let's shift focus to ${objective.targetCompetency}. How do you approach this in your work?`),
-        intent: generated.intent || objective.reasoning,
-        contextExplanation: generated.contextExplanation || `Adaptive probe on ${objective.targetCompetency}`,
-        expectedSignals: generated.expectedSignals || objective.lookForSignals,
-        redFlags: generated.redFlags || objective.redFlagSignals,
-        expectedAnswerCharacteristics: generated.expectedSignals || objective.lookForSignals,
-        evaluationCriteria: generated.evaluationCriteria || {
-          coreCompetency: objective.targetCompetency,
-          lookFor: objective.lookForSignals,
-          redFlags: objective.redFlagSignals,
-          rubricDimensions: ['clarity', 'depth', 'evidence', 'relevance', 'structure', 'role_alignment'],
-        },
-      };
-    } catch (err) {
-      console.warn('Fallback adaptive question generation:', err);
-      return {
-        id: `q_${Date.now()}_${objective.order}`,
-        order: objective.order,
-        type: isFollowUp ? 'follow_up' : 'initial',
-        questionType: isFollowUp ? 'clarification' : 'product_sense',
-        source: isFollowUp ? 'follow_up' : 'job_description',
-        sourceReference: objective.targetCompetency,
-        targetCompetency: objective.targetCompetency,
-        category: objective.targetCompetency,
-        text: isFollowUp
-          ? `You mentioned that approach—could you elaborate on the specific baseline metrics or trade-offs you encountered?`
-          : `Moving on to ${objective.targetCompetency}, how have you approached this in high-stakes environments?`,
-        intent: objective.reasoning,
-        contextExplanation: `Objective: ${objective.targetCompetency}`,
-        expectedSignals: objective.lookForSignals,
-        redFlags: objective.redFlagSignals,
-        expectedAnswerCharacteristics: objective.lookForSignals,
-      };
+        const validation = validateQuestion(
+          {
+            ...generated,
+            targetCompetency: objective.targetCompetency,
+            category: generated.category || objective.targetCompetency,
+            difficulty: objective.difficulty,
+          },
+          existingQuestions,
+          objective,
+          lockedContext,
+          jdEvidenceModel
+        );
+
+        if (validation.isValid && validation.validated) {
+          return validation.validated;
+        }
+      } catch (err) {
+        console.warn(`Adaptive question generation attempt ${attempt} warning:`, err);
+      }
     }
+
+    // Fallback template on validation failure
+    return generateFallbackQuestion(objective, lockedContext, jdEvidenceModel, existingQuestions.length + 1);
   },
 
   /**
@@ -1271,13 +1262,18 @@ Rules:
     try {
       const { ANSWER_EVALUATOR_POLICY } = await import('../ai/aiPolicy');
       const { applyDeterministicConstraints } = await import('../ai/scoringRubric');
+      const { calculateDeterministicScore } = await import('../ai/answerScoreEngine');
+
+      const expectedSignals = question?.expectedSignals && question.expectedSignals.length > 0
+        ? question.expectedSignals
+        : question?.expectedAnswerCharacteristics || [];
 
       const prompt = `
 === TASK: CANDIDATE ANSWER MULTI-PHASE EVALUATION ===
 
 QUESTION: "${question?.text || ''}"
-Category / Type: "${question?.category || 'General'}"
-Expected Characteristics: ${JSON.stringify(question?.expectedAnswerCharacteristics || question?.expectedSignals || [])}
+Category / Target Competency: "${question?.targetCompetency || question?.category || 'General'}"
+Expected Signals: ${JSON.stringify(expectedSignals)}
 Target Role: "${role || 'Target Role'}"
 Target Company: "${company || 'Target Company'}"
 Difficulty: "${difficulty || 'intermediate'}"
@@ -1286,17 +1282,21 @@ CANDIDATE ANSWER:
 "${cleanAnswer || 'No response provided.'}"
 
 Instructions:
-1. Classify answer: 'strong' | 'adequate' | 'weak' | 'irrelevant' | 'not_answered' | 'evasive' | 'unprofessional' | 'unsupported_claim'.
-2. Execute Relevance Gate: ('answered' | 'partially_answered' | 'not_answered').
-3. Propose 6 dimensional scores (relevance, structure, clarity, depth, evidence, roleAlignment).
-4. Provide structured coaching (whatWorked, whatHeldYouBack, tryThisNextTime).
+1. Classify answer: 'strong' | 'adequate' | 'weak' | 'irrelevant' | 'not_answered' | 'uncertain' | 'clarification_request' | 'repeat_request' | 'refusal'.
+2. Relevance Gate: ('answered' | 'partially_answered' | 'not_answered').
+3. Extract positiveObservations: [{ "observation": string, "evidenceText": string }] (MUST quote candidate text snippet; if none, return []).
+4. Identify gaps: [{ "missingSignal": string, "expectedSignal": string }].
+5. Propose 6 dimensional scores (relevance, structure, clarity, depth, evidence, roleAlignment).
+6. Provide structured coaching (whatWorked, whatHeldYouBack, tryThisNextTime).
 
 Return strict JSON:
 {
-  "answerClassification": "strong" | "adequate" | "weak" | "irrelevant" | "not_answered" | "evasive" | "unprofessional" | "unsupported_claim",
+  "answerClassification": "strong" | "adequate" | "weak" | "irrelevant" | "not_answered" | "uncertain" | "clarification_request" | "repeat_request" | "refusal",
   "relevanceGate": { "status": "answered" | "partially_answered" | "not_answered", "score": number, "reason": string },
-  "professionalism": { "status": "acceptable" | "concerning" | "poor" },
-  "completenessMap": { "observedCharacteristics": string[] },
+  "positiveObservations": [{ "observation": string, "evidenceText": string }],
+  "gaps": [{ "missingSignal": string, "expectedSignal": string }],
+  "demonstratedSignals": string[],
+  "missingSignals": string[],
   "breakdown": { "relevance": number, "structure": number, "clarity": number, "depth": number, "evidence": number, "roleAlignment": number },
   "whatWorked": string[],
   "whatHeldYouBack": string[],
@@ -1318,10 +1318,41 @@ Return strict JSON:
         cleanAnswer
       );
 
+      // Verify positiveObservations contain actual candidate evidence text
+      const validPositiveObs = (rawProposal.positiveObservations || [])
+        .filter((obs: any) => obs.evidenceText && cleanAnswer.includes(obs.evidenceText.trim().slice(0, 30)))
+        .map((obs: any) => ({ observation: obs.observation, evidenceText: obs.evidenceText }));
+
+      const structuredEvaluation: import('../../types/interview').AnswerEvaluation = {
+        questionId: question?.id,
+        answerClassification: constrained.answerClassification as any,
+        relevanceGate: constrained.relevanceGate,
+        positiveObservations: validPositiveObs,
+        gaps: rawProposal.gaps || [],
+        dimensions: {
+          relevance: { score: constrained.breakdown.relevance, assessmentStatus: 'assessed', reason: 'Relevance to prompt' },
+          structure: { score: constrained.breakdown.structure, assessmentStatus: 'assessed', reason: 'Structural organization' },
+          clarity: { score: constrained.breakdown.clarity, assessmentStatus: 'assessed', reason: 'Clarity of articulation' },
+          depth: { score: constrained.breakdown.depth, assessmentStatus: 'assessed', reason: 'Analytical/technical depth' },
+          evidence: { score: constrained.breakdown.evidence, assessmentStatus: 'assessed', reason: 'Evidence and metrics' },
+          roleAlignment: { score: constrained.breakdown.roleAlignment, assessmentStatus: 'assessed', reason: 'Alignment with role' },
+        },
+        competencySignalsExtracted: validPositiveObs.map((obs: any) => ({
+          competency: question?.targetCompetency || question?.category || 'Competency',
+          signalStrength: constrained.overallScore >= 8.0 ? 'strong' : 'moderate',
+          evidenceText: obs.evidenceText,
+        })),
+        expectedSignals,
+        demonstratedSignals: rawProposal.demonstratedSignals || constrained.whatWorked || [],
+        missingSignals: rawProposal.missingSignals || constrained.whatHeldYouBack || [],
+      };
+
+      const deterministicScore = calculateDeterministicScore(structuredEvaluation);
+
       return {
         questionId: question?.id || 'q_unknown',
-        overallScore: constrained.overallScore,
-        scoreInterval: constrained.scoreInterval,
+        overallScore: deterministicScore.score,
+        scoreInterval: deterministicScore.scoreInterval,
         answerClassification: constrained.answerClassification,
         relevanceGate: constrained.relevanceGate,
         professionalism: constrained.professionalism,
@@ -1329,12 +1360,14 @@ Return strict JSON:
         breakdown: constrained.breakdown,
         dimensionDetails: constrained.dimensionDetails,
         unverifiedClaims: constrained.unverifiedClaims,
-        whatWorked: constrained.whatWorked,
+        whatWorked: validPositiveObs.map((p: any) => p.observation),
         whatHeldYouBack: constrained.whatHeldYouBack,
         tryThisNextTime: constrained.tryThisNextTime,
         deterministicConstraintsApplied: constrained.deterministicConstraintsApplied,
-        followUpNeeded: constrained.shouldFollowUp && (remainingMinutes === undefined || remainingMinutes > 3),
-        followUpTriggerReason: constrained.followUpReasonCode,
+        shouldFollowUp: constrained.shouldFollowUp && (remainingMinutes === undefined || remainingMinutes > 3),
+        followUpReasonCode: constrained.followUpReasonCode,
+        answerEvaluation: structuredEvaluation,
+        deterministicScore,
       };
     } catch (clientErr) {
       console.warn('AI evaluation API unavailable, using dynamic deterministic rubric evaluator:', clientErr);
@@ -1346,6 +1379,72 @@ Return strict JSON:
         company,
         difficulty,
       });
+    }
+  },
+
+  /**
+   * Step 8B: Conversational Response Generator
+   * Generates natural professional interviewer language based on a deterministic ConversationIntent.
+   * Never leaks internal scores, provisional reliability, or competency names.
+   */
+  async generateConversationalInterviewerTurn(params: {
+    intent: import('../../types/interview').ConversationIntent;
+    currentQuestion?: Question;
+    nextQuestion?: Question;
+    candidateName?: string;
+    role?: string;
+    company?: string;
+  }): Promise<string> {
+    const { intent, currentQuestion, nextQuestion, candidateName = 'Candidate' } = params;
+    const apiKey = getClientApiKey();
+
+    if (intent.action === 'acknowledge_repeat_request') {
+      return `Certainly! Let me repeat the question: "${intent.repeatOriginalQuestion || currentQuestion?.text || ''}"`;
+    }
+
+    if (intent.action === 'acknowledge_uncertainty') {
+      return `Understood—thank you for your candor. Let's explore this scenario: "${nextQuestion?.text || ''}"`;
+    }
+
+    if (intent.action === 'reask') {
+      return `Let's make sure we address the core question. "${intent.repeatOriginalQuestion || currentQuestion?.text || ''}"`;
+    }
+
+    if (intent.action === 'close') {
+      return `Thank you, ${candidateName}. We have concluded all interview questions today. Your evaluation report is now being synthesized.`;
+    }
+
+    try {
+      const prompt = `
+You are an executive interviewer. Deliver a natural, professional 1-sentence transition and ask the next question.
+
+Intent Action: ${intent.action}
+Intent Tone: ${intent.tone}
+${intent.reason ? `Reason: ${intent.reason}` : ''}
+Next Question to Ask: "${nextQuestion?.text || currentQuestion?.text || ''}"
+
+RULES:
+- Keep it concise (1-2 sentences maximum).
+- DO NOT reveal internal numerical scores, ratings, or percentages.
+- DO NOT reveal internal competency names (e.g. "analytics competency", "execution reliability").
+- DO NOT mention rubric dimensions or diagnostic objectives.
+- Seamlessly transition and clearly ask the Next Question.
+
+Generate only the spoken interviewer response text:
+`;
+
+      const spoken = await callClientGeminiText(
+        prompt,
+        'You are an executive interviewer. Speak naturally with zero score or internal metadata leakage.',
+        { apiKey, temperature: 0.5, maxOutputTokens: 200 }
+      );
+
+      return spoken.trim();
+    } catch (_) {
+      if (nextQuestion?.text) {
+        return nextQuestion.text;
+      }
+      return currentQuestion?.text || 'Could you walk me through your technical approach to this challenge?';
     }
   },
 

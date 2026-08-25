@@ -54,6 +54,28 @@ export interface LineBlock {
   section?: string;
 }
 
+export interface ResumeSemanticBlock {
+  id: string;
+  section:
+    | 'summary'
+    | 'experience'
+    | 'projects'
+    | 'education'
+    | 'skills'
+    | 'certifications'
+    | 'achievements'
+    | 'other';
+  heading: string | null;
+  lines: string[];
+  blockText: string;
+  startLine: number;
+  endLine: number;
+  pageStart?: number;
+  pageEnd?: number;
+  structuralConfidence: number;
+  link?: string | null;
+}
+
 export interface ExtractedProjectBlock {
   id: string;
   heading: string;
@@ -63,6 +85,24 @@ export interface ExtractedProjectBlock {
   blockText: string;
   name?: string;
   text?: string;
+  link?: string | null;
+  structuralConfidence?: number;
+}
+
+export interface ExtractedExperienceBlock {
+  id: string;
+  role: string | null;
+  company: string | null;
+  location?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  current?: boolean;
+  highlights: string[];
+  lines: string[];
+  blockText: string;
+  startLine: number;
+  endLine: number;
+  structuralConfidence?: number;
 }
 
 export interface ExtractedEducationBlock {
@@ -75,6 +115,18 @@ export interface ExtractedEducationBlock {
   endLine: number;
   lines: string[];
   blockText: string;
+  structuralConfidence?: number;
+}
+
+export interface ExtractedAchievementBlock {
+  id: string;
+  title: string;
+  description?: string;
+  lines: string[];
+  blockText: string;
+  startLine: number;
+  endLine: number;
+  structuralConfidence?: number;
 }
 
 export interface ExtractedDocument {
@@ -82,8 +134,11 @@ export interface ExtractedDocument {
   normalizedText: string;
   sections: ExtractedSection[];
   lineBlocks?: LineBlock[];
+  detectedSemanticBlocks?: ResumeSemanticBlock[];
   detectedProjects?: ExtractedProjectBlock[];
+  detectedExperience?: ExtractedExperienceBlock[];
   detectedEducation?: ExtractedEducationBlock[];
+  detectedAchievements?: ExtractedAchievementBlock[];
   pageCount?: number;
   characterCount: number;
   documentType: DocumentType;
@@ -133,6 +188,8 @@ export interface ProjectEvidence {
   contribution?: EvidenceItem;   // null/undefined if not found
   technologies: EvidenceItem[];
   outcomes: EvidenceItem[];      // metrics, results — often missing → []
+  link?: string | null;
+  structuralConfidence?: number;
 }
 
 export interface EducationEvidence {
@@ -258,11 +315,14 @@ export interface CandidateProject {
   description: string;
   technologies?: string[];
   metrics?: string;
+  link?: string | null;
 }
 
 export interface CandidateProfile {
   name: string;
   summary: string;
+  role?: string;
+  targetRole?: string;
   education: CandidateEducation[];
   experience: CandidateExperience[];
   projects: CandidateProject[];

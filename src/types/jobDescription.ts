@@ -1,33 +1,60 @@
-// ─── JD Evidence Model ───────────────────────────────────────────────────────
+// ─── JD Evidence Model Standard ───────────────────────────────────────────────
 
-/**
- * How explicitly a requirement appears in the JD.
- * explicit  = stated directly ("Must have threat modeling experience")
- * preferred = stated as optional ("Nice to have SIEM knowledge")
- * inferred  = implied by context ("Works across engineering and business teams")
- */
-export type RequirementStrength = 'explicit' | 'preferred' | 'inferred';
+export type RequirementStrength =
+  | 'explicit'
+  | 'preferred'
+  | 'inferred';
+
+export type RequirementCategory =
+  | 'skill'
+  | 'responsibility'
+  | 'competency'
+  | 'technical'
+  | 'domain'
+  | 'behavioral'
+  | 'experience'
+  | 'education'
+  | 'certification'
+  | 'other';
 
 export interface JDRequirement {
+  id: string;
   requirement: string;
-  sourceText: string;            // exact sentence or phrase from the JD
+  sourceText: string;
+  category: RequirementCategory;
   strength: RequirementStrength;
-  competencySignal: string;      // maps to competency model (e.g. 'analytics')
+  competencySignal?: string;
   confidence: 'high' | 'medium' | 'low';
+  critical: boolean;
 }
 
 export interface JDEvidenceModel {
-  role: string;
-  company?: string;
-  seniority: 'junior' | 'mid' | 'senior' | 'lead' | 'principal' | 'unknown';
+  role: string | null;
+  company?: string | null;
+  seniority:
+    | 'intern'
+    | 'junior'
+    | 'mid'
+    | 'senior'
+    | 'lead'
+    | 'principal'
+    | 'unknown';
   requiredSkills: JDRequirement[];
   preferredSkills: JDRequirement[];
   responsibilities: JDRequirement[];
-  criticalCompetencies: string[];       // ordered by importance
-  behavioralSignals: JDRequirement[];   // e.g. "works cross-functionally"
+  competencies: JDRequirement[];
   technicalRequirements: JDRequirement[];
-  domainKnowledge: JDRequirement[];     // cybersecurity, fintech, edtech, etc.
-  hiringSignals: string[];              // what a strong hire looks like
+  domainKnowledge: JDRequirement[];
+  behavioralSignals: JDRequirement[];
+  experienceRequirements: JDRequirement[];
+  educationRequirements: JDRequirement[];
+  certificationRequirements: JDRequirement[];
+  hiringSignals: string[];
+  criticalCompetencies?: string[];
+  domainKeywords?: string[];
+  roleKeywords?: string[];
+  redFlags?: string[];
+  extractionWarnings: string[];
 }
 
 // ─── JobProfile (Flat Derived View — Backward Compat) ────────────────────────

@@ -58,12 +58,18 @@ export function cleanJsonText(raw: string): string {
 const getEffectiveApiKey = (customKey?: string): string => {
   let key = (customKey || '').trim();
 
-  if (!key && typeof import.meta !== 'undefined' && import.meta.env) {
-    key = (import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+  if (!key) {
+    try {
+      key = (import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+    } catch {}
   }
 
-  if (!key && typeof process !== 'undefined' && process.env) {
-    key = (process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+  if (!key) {
+    try {
+      if (typeof process !== 'undefined' && process?.env) {
+        key = (process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '').trim();
+      }
+    } catch {}
   }
 
   if (!key) {

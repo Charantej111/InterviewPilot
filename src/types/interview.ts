@@ -1,5 +1,5 @@
 export type InterviewType = 'behavioral' | 'product_case' | 'technical' | 'mixed';
-export type InterviewDifficulty = 'beginner' | 'intermediate' | 'advanced';
+export type InterviewDifficulty = 'beginner' | 'intermediate' | 'advanced' | 'foundational';
 export type InterviewDuration = 10 | 15 | 20 | 30 | 45;
 export type InterviewStyle = 'friendly' | 'realistic' | 'challenging';
 export type InterviewMode = 'text' | 'voice';
@@ -14,7 +14,8 @@ export type QuestionType =
   | 'case' 
   | 'resume_deep_dive' 
   | 'company_specific' 
-  | 'clarification';
+  | 'clarification'
+  | 'closing';
 
 export type QuestionSource = 
   | 'resume' 
@@ -38,7 +39,13 @@ export type AnswerClassification =
   | 'not_answered' 
   | 'evasive' 
   | 'unprofessional' 
-  | 'unsupported_claim';
+  | 'unsupported_claim'
+  | 'partially_answered'
+  | 'answered'
+  | 'uncertain'
+  | 'clarification_request'
+  | 'repeat_request'
+  | 'refusal';
 
 export type VoiceStatus = 
   | 'idle' 
@@ -78,7 +85,7 @@ export interface InterviewConversationState {
   recentTurns: ConversationTurn[];
   followUpsUsed: number;
   remainingTime: number;
-  testedCompetencies?: Record<string, number>; // competency -> verification score
+  testedCompetencies?: Record<string, number>;
 }
 
 export interface QuestionEvaluationCriteria {
@@ -93,27 +100,84 @@ export interface AdaptiveFollowUpTrigger {
   followUpProbe: string;
 }
 
+// ─── Phase 3: Interview Contract & Competency Map Types ────────────────────────
+
+export interface InterviewContract {
+  sessionId: string;
+  mode: 'jd_matched' | 'resume_grounded';
+  durationSeconds: number;
+  criticalCompetencies: string[];
+  optionalCompetencies: string[];
+  minQuestions: number;
+  maxQuestions: number;
+  maxFollowUpsPerTopic: number;
+  minimumEvidenceTargets: number;
+  timeBudget: {
+    opening: number;
+    coreAssessment: number;
+    gapProbing: number;
+    closing: number;
+  };
+  createdAt: string;
+}
+
+export type AssessmentStatus =
+  | 'untested'
+  | 'partial'
+  | 'assessed';
+
+export type AssessmentReliability =
+  | 'insufficient'
+  | 'provisional'
+  | 'reliable';
+
+export interface CompetencyEvidence {
+  signal: string;
+  strength: 'strong' | 'moderate' | 'weak';
+  sourceText: string;
+}
+
+export interface CompetencyState {
+  status: AssessmentStatus;
+  confidence: 'none' | 'low' | 'medium' | 'high';
+  evidence: CompetencyEvidence[];
+  missingSignals: string[];
+  questionsAsked: number;
+  followUpsUsed: number;
+  assessmentReliability: AssessmentReliability;
+  importance: 'critical' | 'optional';
+}
+
+export type CompetencyMap = Record<string, CompetencyState>;
+
 export type ObjectiveType = 
   | 'verify_strength' 
   | 'probe_gap' 
   | 'test_critical_competency' 
   | 'explore_domain' 
-  | 'clarify_evidence';
+  | 'clarify_evidence'
+  | 'closing';
 
 export interface InterviewObjective {
-  id: string;
-  order: number;
-  type: ObjectiveType;
+  id?: string;
+  order?: number;
   targetCompetency: string;
+  questionType: QuestionType;
+  intent: string;
+  useResumeGrounding: boolean;
+  difficulty: 'foundational' | 'intermediate' | 'advanced' | 'beginner';
+  timeAllocationSeconds: number;
+  isFollowUp: boolean;
+  followUpReason?: string;
+  expectedSignals?: string[];
   focusRequirement?: string;
   focusEvidenceSummary?: string;
-  reasoning: string;
-  lookForSignals: string[];
-  redFlagSignals: string[];
+  lookForSignals?: string[];
+  redFlagSignals?: string[];
+  reasoning?: string;
 }
 
 export interface Question {
-
   id: string;
   order: number;
   type: 'initial' | 'follow_up';
@@ -135,6 +199,7 @@ export interface Question {
   adaptiveFollowUpTriggers?: AdaptiveFollowUpTrigger[];
   expectedKeyPoints?: string[];
   answerabilityStatus?: AnswerabilityStatus;
+  difficulty?: InterviewDifficulty;
 }
 
 export interface CandidateAnswer {
@@ -185,11 +250,112 @@ export interface UnverifiedClaimResult {
   note: string;
 }
 
+// ─── Phase 4: Answer Intelligence & Deterministic Scoring Types ─────────────
+
+export type AnswerEvaluationClassification =
+  | 'answered'
+  | 'partially_answered'
+  | 'not_answered'
+  | 'irrelevant'
+  | 'uncertain'
+  | 'clarification_request'
+  | 'repeat_request'
+  | 'refusal'
+  | 'strong'
+  | 'adequate'
+  | 'weak'
+  | 'evasive'
+  | 'unprofessional'
+  | 'unsupported_claim';
+
+export interface PositiveObservation {
+  observation: string;
+  evidenceText: string;
+}
+
+export interface GapObservation {
+  missingSignal: string;
+  expectedSignal: string;
+}
+
+export type DimensionAssessmentStatus =
+  | 'assessed'
+  | 'partially_assessed'
+  | 'not_assessable'
+  | 'insufficient_evidence';
+
+export interface DimensionResult {
+  score: number | null;
+  assessmentStatus: DimensionAssessmentStatus;
+  reason: string;
+}
+
+export interface CompetencySignalExtracted {
+  competency: string;
+  signalStrength: 'strong' | 'moderate' | 'weak' | 'absent';
+  evidenceText: string;
+}
+
+export interface DeterministicScoreResult {
+  score: number;
+  scoreInterval: [number, number];
+  assessedDimensions: number;
+  excludedDimensions: string[];
+  scoreConfidence: 'low' | 'medium' | 'high';
+}
+
+export interface AnswerEvaluation {
+  questionId?: string;
+  answerClassification: AnswerEvaluationClassification;
+  relevanceGate: {
+    status: 'answered' | 'partially_answered' | 'not_answered';
+    reason: string;
+  };
+  positiveObservations: PositiveObservation[];
+  gaps: GapObservation[];
+  dimensions: {
+    relevance: DimensionResult;
+    structure: DimensionResult;
+    clarity: DimensionResult;
+    depth: DimensionResult;
+    evidence: DimensionResult;
+    roleAlignment: DimensionResult;
+  };
+  competencySignalsExtracted: CompetencySignalExtracted[];
+  expectedSignals: string[];
+  demonstratedSignals: string[];
+  missingSignals: string[];
+  deterministicScore?: DeterministicScoreResult;
+}
+
+export interface AnswerTiming {
+  turnStartedAt: string;
+  answerStartedAt?: string;
+  answerSubmittedAt: string;
+  evaluationCompletedAt: string;
+  nextQuestionGeneratedAt?: string;
+}
+
+export interface ConversationIntent {
+  action:
+    | 'ask_question'
+    | 'reask'
+    | 'probe'
+    | 'acknowledge_repeat_request'
+    | 'acknowledge_uncertainty'
+    | 'transition'
+    | 'close';
+  reason?: string;
+  questionText?: string;
+  tone: 'neutral' | 'encouraging' | 'firm' | 'empathetic';
+  repeatOriginalQuestion?: string;
+}
+
 export interface QuestionFeedback {
   questionId: string;
   overallScore: number; // 0 - 10 calculated deterministically
   scoreInterval?: [number, number];
-  answerClassification: AnswerClassification;
+  answerClassification: AnswerClassification | AnswerEvaluationClassification;
   relevanceGate: RelevanceGateResult;
   professionalism: ProfessionalismResult;
   completenessMap?: CompletenessMapResult;
@@ -216,6 +382,18 @@ export interface QuestionFeedback {
   deterministicConstraintsApplied?: string[];
   shouldFollowUp?: boolean;
   followUpReasonCode?: 'missing_evidence' | 'missing_metric' | 'unclear_decision' | 'missing_tradeoff' | 'shallow_reasoning' | 'unsupported_claim' | 'partial_answer' | 'technical_gap';
+  observedSignals?: string[];
+  missingSignals?: string[];
+  answerEvaluation?: AnswerEvaluation;
+  deterministicScore?: DeterministicScoreResult;
+}
+
+export interface TurnTimingMetrics {
+  turnStartedAt: string;
+  answerStartedAt?: string;
+  answerSubmittedAt?: string;
+  evaluationCompletedAt?: string;
+  nextQuestionGeneratedAt?: string;
 }
 
 export interface InterviewSession {
@@ -253,6 +431,10 @@ export interface InterviewSession {
   answers: Record<string, CandidateAnswer>;
   feedbacks: Record<string, QuestionFeedback>;
   finalReportId?: string;
+  interviewContract?: InterviewContract;
+  competencyMap?: CompetencyMap;
+  currentObjective?: InterviewObjective;
+  turnTimings?: TurnTimingMetrics[];
 }
 
 export interface DeliveryObservation {

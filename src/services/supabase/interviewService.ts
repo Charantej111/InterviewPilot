@@ -467,7 +467,18 @@ export const interviewService = {
 
     // 1. Try Supabase complete-interview Edge Function
     try {
-      const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_AI_API_KEY || '';
+      let apiKey = '';
+      try {
+        apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY || '';
+      } catch {}
+
+      if (!apiKey) {
+        try {
+          if (typeof process !== 'undefined' && process?.env) {
+            apiKey = process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY || '';
+          }
+        } catch {}
+      }
       const { data, error } = await supabase.functions.invoke('complete-interview', {
         body: {
           interviewId,

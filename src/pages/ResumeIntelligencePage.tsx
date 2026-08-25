@@ -24,10 +24,16 @@ import {
   FileText,
 } from 'lucide-react';
 import type { CandidateEvidenceModel, EvidenceConfidence } from '../types/resume';
+import { ResumeIntelligenceDebugPanel } from '../components/dev/ResumeIntelligenceDebugPanel';
 
 export const ResumeIntelligencePage: React.FC = () => {
   const navigate = useNavigate();
   const { setupDraft, confirmCandidateProfile } = useInterview();
+
+  const isDebugMode = typeof window !== 'undefined' && (
+    new URLSearchParams(window.location.search).get('debug') === 'true' ||
+    new URLSearchParams(window.location.search).get('resumeDebug') === 'true'
+  );
 
   const [evidence, setEvidence] = useState<CandidateEvidenceModel | null>(
     setupDraft.candidateEvidenceModel || null
@@ -168,7 +174,6 @@ export const ResumeIntelligencePage: React.FC = () => {
     }
   };
 
-  const isDebugMode = typeof window !== 'undefined' && window.location.search.includes('resumeDebug=true');
   const [showDebug, setShowDebug] = useState(false);
 
   const initials = candidateName
@@ -232,68 +237,13 @@ export const ResumeIntelligencePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Comprehensive Real-World Pipeline Diagnostic Overlay (?resumeDebug=true) */}
-        {isDebugMode && showDebug && (
-          <div className="p-6 rounded-3xl bg-zinc-950 border border-purple-500/40 text-white font-mono text-xs space-y-5 shadow-2xl animate-fadeIn">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <span className="text-purple-400 font-bold uppercase tracking-wider">🔬 Extraction Pipeline Diagnostic Overlay</span>
-              <span className="text-zinc-500 text-[11px]">Extraction ID: {setupDraft.resumeId || 'Active'}</span>
-            </div>
-
-            {/* Pipeline Stage Counts Matrix */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px]">
-              <div>
-                <span className="text-zinc-500 block">Raw Characters:</span>
-                <span className="font-bold text-white">{setupDraft.extractionDebugSnapshot?.characterCount || setupDraft.resumeFileSize}</span>
-              </div>
-              <div>
-                <span className="text-zinc-500 block">Line Blocks:</span>
-                <span className="font-bold text-white">{setupDraft.extractionDebugSnapshot?.lineBlocks.length || 0}</span>
-              </div>
-              <div>
-                <span className="text-zinc-500 block">Detected Projects:</span>
-                <span className="font-bold text-emerald-400">{setupDraft.extractionDebugSnapshot?.detectedProjects.length || projects.length}</span>
-              </div>
-              <div>
-                <span className="text-zinc-500 block">Detected Education:</span>
-                <span className="font-bold text-blue-400">{setupDraft.extractionDebugSnapshot?.detectedEducation.length || education.length}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* 1. Line Blocks */}
-              <div className="space-y-1.5">
-                <span className="text-zinc-400 font-bold">1. Reconstructed Line Blocks (First 30)</span>
-                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-zinc-300">
-                  {(setupDraft.extractionDebugSnapshot?.lineBlocks || []).slice(0, 30).map((b) => `[L${b.lineNumber}] [${b.section || 'N/A'}] ${b.text}`).join('\n') || 'No line blocks captured'}
-                </pre>
-              </div>
-
-              {/* 2. Detected Project Blocks */}
-              <div className="space-y-1.5">
-                <span className="text-zinc-400 font-bold">2. Pre-Segmented Project Blocks ({setupDraft.extractionDebugSnapshot?.detectedProjects.length || 0})</span>
-                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-emerald-400">
-                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.detectedProjects || [], null, 2)}
-                </pre>
-              </div>
-
-              {/* 3. Detected Education Blocks */}
-              <div className="space-y-1.5">
-                <span className="text-zinc-400 font-bold">3. Pre-Segmented Education Blocks ({setupDraft.extractionDebugSnapshot?.detectedEducation.length || 0})</span>
-                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-blue-400">
-                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.detectedEducation || [], null, 2)}
-                </pre>
-              </div>
-
-              {/* 4. Rejected Evidence with Provenance Reasons */}
-              <div className="space-y-1.5">
-                <span className="text-zinc-400 font-bold">4. Rejected Items & Provenance Audit ({setupDraft.extractionDebugSnapshot?.rejectedEvidence.length || 0})</span>
-                <pre className="p-3 bg-zinc-900 rounded-xl text-[11px] max-h-56 overflow-y-auto text-rose-400">
-                  {JSON.stringify(setupDraft.extractionDebugSnapshot?.rejectedEvidence || [], null, 2)}
-                </pre>
-              </div>
-            </div>
-          </div>
+        {/* Comprehensive Real-World Pipeline Diagnostic Overlay (?resumeDebug=true or ?debug=true) */}
+        {isDebugMode && (
+          <ResumeIntelligenceDebugPanel
+            debugSnapshot={setupDraft.extractionDebugSnapshot}
+            candidateName={candidateName}
+            isOpenDefault={true}
+          />
         )}
 
         {/* Real Measurable Reading Status Bar */}

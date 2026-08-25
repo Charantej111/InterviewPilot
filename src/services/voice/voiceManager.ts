@@ -19,7 +19,18 @@ export const voiceManager = {
    * Securely requests an authenticated, short-lived real-time voice session from Supabase Edge Function.
    */
   async createVoiceSession(interviewId: string): Promise<VoiceSessionConfig> {
-    const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || undefined;
+    let apiKey: string | undefined;
+    try {
+      apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GOOGLE_AI_API_KEY;
+    } catch {}
+
+    if (!apiKey) {
+      try {
+        if (typeof process !== 'undefined' && process?.env) {
+          apiKey = process.env.VITE_GEMINI_API_KEY || process.env.VITE_GOOGLE_AI_API_KEY;
+        }
+      } catch {}
+    }
     const { data, error } = await supabase.functions.invoke('create-voice-session', {
       body: { interviewId, apiKey },
     });

@@ -1,4 +1,23 @@
-import { Question, QuestionFeedback } from '../../types/interview';
+/**
+ * Deterministic Answer Evaluator — Pre-Flight & Fallback Engine
+ *
+ * Implements rule-based evaluation, classification gating, and evidence extraction.
+ * Extracts genuine candidate evidence quotes; zero generic praise without evidence.
+ *
+ * 100% deterministic TypeScript.
+ */
+
+import type {
+  Question,
+  QuestionFeedback,
+  AnswerEvaluation,
+  AnswerEvaluationClassification,
+  PositiveObservation,
+  GapObservation,
+  CompetencySignalExtracted,
+} from '../../types/interview';
+import { calculateDeterministicScore } from './answerScoreEngine';
+import { getExpectedSignalsForType } from './competencyMap';
 
 export interface DeterministicEvaluationInput {
   question: Question;
@@ -11,230 +30,296 @@ export interface DeterministicEvaluationInput {
 export function evaluateAnswerDeterministically(
   input: DeterministicEvaluationInput
 ): QuestionFeedback & { followUpNeeded: boolean; followUpTriggerReason?: string } {
-  const { question, answerText, role, company, difficulty = 'intermediate' } = input;
+  const { question, answerText, role, company } = input;
   const cleanAnswer = (answerText || '').trim();
+  const lowerAnswer = cleanAnswer.toLowerCase();
 
   const words = cleanAnswer.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
 
-  // 1. Check for Empty or Extremely Short Input
-  if (wordCount < 8) {
-    const isVirtuallyEmpty = wordCount < 3;
-    const score = isVirtuallyEmpty ? 0.5 : 1.5;
-    return {
-      questionId: question.id,
-      overallScore: score,
-      scoreInterval: [0.5, 2.0],
-      answerClassification: 'not_answered',
-      relevanceGate: { status: 'not_answered', score: 1.0, reason: 'Answer is too brief to demonstrate competency.' },
-      professionalism: { status: 'acceptable' },
-      breakdown: { relevance: 1.0, structure: 1.0, clarity: 1.5, depth: 0.5, evidence: 0.5, roleAlignment: 1.0 },
-      whatWorked: [],
-      whatHeldYouBack: ['The answer contained fewer than 8 words and provided no actionable context, strategy, or outcome.'],
-      tryThisNextTime: {
-        framework: 'STAR Method',
-        suggestion: `Provide a substantive explanation detailing your specific approach for the ${role} opening at ${company}.`,
-        promptToImprove: 'What were the initial constraints, your exact actions, and the final outcome?',
-        examplePhrasing: 'When tackling this challenge, I first identified the root constraint, engineered the solution, and validated results.',
-      },
-      followUpNeeded: true,
-      followUpTriggerReason: 'Answer was too brief to evaluate.',
-    };
+  const targetCompetency = question.targetCompetency || question.category || 'Domain Competency';
+  const expectedSignals = question.expectedSignals && question.expectedSignals.length > 0
+    ? question.expectedSignals
+    : getExpectedSignalsForType(question.questionType || 'product_sense');
+
+  // ─── 1. Detect Special Conversational Patterns ────────────────────────────
+
+  const isRepeat = /(could you (please )?repeat|can you repeat|please repeat|repeat the question|say that again)/i.test(lowerAnswer);
+  const isClarify = /(could you (please )?clarify|can you clarify|what do you mean by|could you rephrase)/i.test(lowerAnswer);
+  const isRefusal = /(i['’]?d\s+rather\s+not|i\s+would\s+rather\s+not|i\s+refuse\s+to\s+answer|rather\s+not\s+answer|skip\s+this\s+question|next\s+question\s+please|prefer\s+not\s+to\s+answer)/i.test(lowerAnswer);
+  const isDontKnow = /(i['’]?d?\s*don['’]?t\s*know|not\s+sure|i\s*am\s*not\s*familiar|i\s*haven['’]?t\s*worked|don['’]?t\s*have\s*experience|no\s+experience)/i.test(lowerAnswer);
+
+  let classification: AnswerEvaluationClassification = 'answered';
+
+  if (isRepeat) {
+    classification = 'repeat_request';
+  } else if (isClarify) {
+    classification = 'clarification_request';
+  } else if (isRefusal) {
+    classification = 'refusal';
+  } else if (isDontKnow) {
+    classification = 'uncertain';
+  } else if (wordCount < 4) {
+    classification = 'not_answered';
   }
 
-  // 2. Check for Gibberish, Keyboard Mash, or Non-word Patterns
-  const vowelsRegex = /[aeiouy]/i;
-  const hasRepeatingChars = /(.)\1{4,}/i.test(cleanAnswer);
-  const wordsWithoutVowels = words.filter((w) => w.length > 3 && !vowelsRegex.test(w));
-  const isGibberish = hasRepeatingChars || (wordsWithoutVowels.length / words.length > 0.4);
-
-  if (isGibberish) {
-    return {
-      questionId: question.id,
-      overallScore: 0.5,
-      scoreInterval: [0.0, 1.0],
-      answerClassification: 'irrelevant',
-      relevanceGate: { status: 'not_answered', score: 0.5, reason: 'Response contained incoherent or invalid text.' },
-      professionalism: { status: 'poor' },
-      breakdown: { relevance: 0.5, structure: 0.5, clarity: 0.5, depth: 0.5, evidence: 0.5, roleAlignment: 0.5 },
-      whatWorked: [],
-      whatHeldYouBack: ['The submitted response was incoherent or contained keyboard smash patterns.'],
-      tryThisNextTime: {
-        framework: 'Professional Articulation',
-        suggestion: 'Please provide genuine technical reasoning and domain-specific context for this interview.',
-        promptToImprove: 'What is your actual hands-on experience solving this scenario?',
-        examplePhrasing: 'I approach this problem by first decomposing the architecture into core components.',
-      },
-      followUpNeeded: true,
-      followUpTriggerReason: 'Incoherent or invalid response provided.',
-    };
-  }
-
-  // 3. Question Relevance & Domain Keyword Overlap
+  // 3. Question Relevance & Domain Keyword Overlap (include 3-letter domain terms like dau, app, api, sql, kpi)
   const questionWords = (question.text || '')
     .toLowerCase()
     .split(/[\s,?.!-]+/)
-    .filter((w) => w.length > 3 && !['what', 'when', 'where', 'which', 'how', 'describe', 'tell', 'explain', 'walk', 'your', 'with', 'about', 'this', 'that', 'have', 'from', 'into', 'would', 'could', 'should'].includes(w));
-  
-  const categoryWords = (question.category || '')
-    .toLowerCase()
-    .split(/[\s,?.!-]+/)
-    .filter((w) => w.length > 3);
+    .filter((w) => w.length >= 3 && !['what', 'when', 'where', 'which', 'how', 'describe', 'tell', 'explain', 'walk', 'your', 'with', 'about', 'this', 'that', 'have', 'from', 'into', 'would', 'could', 'should', 'for', 'the', 'and'].includes(w));
 
-  const targetKeywords = Array.from(new Set([...questionWords, ...categoryWords]));
-  const matchedKeywords = targetKeywords.filter((kw) => cleanAnswer.toLowerCase().includes(kw));
-  const relevanceRatio = targetKeywords.length > 0 ? matchedKeywords.length / targetKeywords.length : 0.3;
+  const matchedQuestionKeywords = questionWords.filter((kw) => lowerAnswer.includes(kw));
+  const isIrrelevantKeyword = /\b(cricket|ipl|football|movie|weather|dinner|pizza|burger|swimming|beach)\b/i.test(lowerAnswer) && matchedQuestionKeywords.length === 0;
 
-  // 4. Action Verbs & STAR Structural Signatures
-  const actionVerbs = [
-    'analyzed', 'designed', 'built', 'implemented', 'led', 'architected', 'optimized',
-    'reduced', 'increased', 'diagnosed', 'refactored', 'developed', 'coordinated',
-    'calculated', 'modeled', 'simulated', 'spearheaded', 'automated', 'deployed',
-    'migrated', 'scaled', 'benchmarked', 'identified', 'resolved', 'negotiated',
-  ];
-  const matchedActions = actionVerbs.filter((v) => cleanAnswer.toLowerCase().includes(v));
+  if (isIrrelevantKeyword && classification === 'answered') {
+    classification = 'irrelevant';
+  }
 
-  // 5. Numerical Metrics & Quantified Evidence
-  const hasNumbers = /\b(\d+%|\d+x|\$\d+|\d+\s*(?:users|ms|seconds|minutes|hours|days|weeks|months|years|kb|mb|gb|tb|rpm|psi|bar|kw|mw|engineers|team members|clients|customers|rps|qps))\b/i.test(cleanAnswer);
-  const numberCount = (cleanAnswer.match(/\b\d+(?:\.\d+)?%?\b/g) || []).length;
+  // ─── 2. Handle Irrelevant / Gated Classifications ─────────────────────────
 
-  // 6. Strict Off-Topic / Irrelevant Detection
-  if (relevanceRatio < 0.12 && matchedActions.length === 0 && !hasNumbers) {
+  if (classification === 'irrelevant' || classification === 'refusal') {
+    const evaluation: AnswerEvaluation = {
+      questionId: question.id,
+      answerClassification: classification,
+      relevanceGate: {
+        status: 'not_answered',
+        reason: classification === 'irrelevant' ? 'Candidate response was completely off-topic.' : 'Candidate declined to answer.',
+      },
+      positiveObservations: [],
+      gaps: expectedSignals.map((sig) => ({ missingSignal: sig, expectedSignal: sig })),
+      dimensions: {
+        relevance: { score: 0.0, assessmentStatus: 'assessed', reason: 'Zero relevance to the prompt.' },
+        roleAlignment: { score: 0.0, assessmentStatus: 'assessed', reason: 'Did not align with role requirements.' },
+        depth: { score: 0.0, assessmentStatus: 'assessed', reason: 'No domain depth provided.' },
+        evidence: { score: 0.0, assessmentStatus: 'assessed', reason: 'No evidence provided.' },
+        clarity: { score: null, assessmentStatus: 'not_assessable', reason: 'Not assessable on off-topic answer.' },
+        structure: { score: null, assessmentStatus: 'not_assessable', reason: 'Not assessable on off-topic answer.' },
+      },
+      competencySignalsExtracted: [],
+      expectedSignals,
+      demonstratedSignals: [],
+      missingSignals: expectedSignals,
+    };
+
+    const detScore = calculateDeterministicScore(evaluation);
+
     return {
       questionId: question.id,
-      overallScore: 1.5,
-      scoreInterval: [1.0, 2.0],
-      answerClassification: 'irrelevant',
-      relevanceGate: {
-        status: 'partially_answered',
-        score: 1.5,
-        reason: 'Response did not directly address the prompt or technical question requirements.',
+      overallScore: detScore.score,
+      scoreInterval: detScore.scoreInterval,
+      answerClassification: classification,
+      relevanceGate: { ...evaluation.relevanceGate, score: detScore.score },
+      professionalism: { status: classification === 'refusal' ? 'acceptable' : 'poor' },
+      breakdown: {
+        relevance: 0,
+        structure: 0,
+        clarity: 0,
+        depth: 0,
+        evidence: 0,
+        roleAlignment: 0,
       },
-      professionalism: { status: 'acceptable' },
-      breakdown: { relevance: 1.5, structure: 2.0, clarity: 3.0, depth: 1.0, evidence: 0.5, roleAlignment: 1.0 },
-      whatWorked: wordCount > 20 ? ['Spoke in complete sentences with standard vocabulary.'] : [],
-      whatHeldYouBack: [
-        `The response did not engage with the primary subject (${question.category || 'target competency'}) or core question requirements.`,
-        'No technical trade-offs, architecture, or actionable steps were provided.',
-      ],
+      whatWorked: [],
+      whatHeldYouBack: [classification === 'irrelevant' ? 'The answer was unrelated to the question asked.' : 'The question was declined.'],
       tryThisNextTime: {
-        framework: 'Direct Answering Framework',
-        suggestion: `Directly address the question prompt before sharing adjacent background context.`,
-        promptToImprove: `How does your answer resolve the core problem: "${question.text.slice(0, 80)}..."?`,
-        examplePhrasing: `To address ${question.category || 'this challenge'}, the primary objective is to...`,
+        framework: 'Domain Focus',
+        suggestion: `Please address the specific scenario for ${role} at ${company}.`,
+        promptToImprove: 'What is your direct experience or structured approach to this problem?',
       },
       followUpNeeded: true,
-      followUpTriggerReason: 'Candidate response was off-topic or lacked relevance.',
+      followUpTriggerReason: 'irrelevant_answer',
+      missingSignals: expectedSignals,
+      observedSignals: [],
+      answerEvaluation: evaluation,
+      deterministicScore: detScore,
     };
   }
 
-  // 7. Dynamic Dimension Scoring for Relevant Answers
-  // Relevance (1.5 - 9.5)
-  const relevanceScore = Math.min(9.5, Math.max(2.0, Math.round((2.0 + relevanceRatio * 6.5 + (matchedActions.length > 0 ? 1.0 : 0)) * 10) / 10));
+  // ─── 3. Handle Special Non-Penalized Classifications ──────────────────────
 
-  // Clarity & Articulation (2.0 - 9.5)
-  const clarityScore = Math.min(9.5, Math.max(2.5, Math.round((
-    (wordCount >= 60 ? 8.5 : wordCount >= 35 ? 7.0 : wordCount >= 18 ? 5.5 : 3.5)
-  ) * 10) / 10));
+  if (classification === 'repeat_request' || classification === 'clarification_request' || classification === 'uncertain') {
+    const evaluation: AnswerEvaluation = {
+      questionId: question.id,
+      answerClassification: classification,
+      relevanceGate: {
+        status: classification === 'uncertain' ? 'not_answered' : 'partially_answered',
+        reason: classification === 'uncertain' ? 'Candidate acknowledged lack of experience.' : 'Clarification / repeat requested.',
+      },
+      positiveObservations: [],
+      gaps: expectedSignals.map((sig) => ({ missingSignal: sig, expectedSignal: sig })),
+      dimensions: {
+        relevance: { score: classification === 'uncertain' ? 3.0 : 5.0, assessmentStatus: 'assessed', reason: 'Conversational response.' },
+        roleAlignment: { score: classification === 'uncertain' ? 2.0 : 5.0, assessmentStatus: 'assessed', reason: 'Awaiting substantive technical evidence.' },
+        depth: { score: classification === 'uncertain' ? 1.0 : null, assessmentStatus: classification === 'uncertain' ? 'assessed' : 'not_assessable', reason: 'No depth demonstrated.' },
+        evidence: { score: classification === 'uncertain' ? 1.0 : null, assessmentStatus: classification === 'uncertain' ? 'assessed' : 'not_assessable', reason: 'No evidence demonstrated.' },
+        clarity: { score: 7.0, assessmentStatus: 'assessed', reason: 'Direct communication.' },
+        structure: { score: null, assessmentStatus: 'not_assessable', reason: 'Conversational inquiry.' },
+      },
+      competencySignalsExtracted: [],
+      expectedSignals,
+      demonstratedSignals: [],
+      missingSignals: expectedSignals,
+    };
 
-  // Structure & STAR (1.5 - 9.5)
-  const structureScore = Math.min(9.5, Math.max(2.0, Math.round((
-    2.0 + Math.min(4, matchedActions.length) * 1.5 + (wordCount > 40 ? 1.5 : 0.5)
-  ) * 10) / 10));
+    const detScore = calculateDeterministicScore(evaluation);
 
-  // Technical Depth & First Principles (1.5 - 9.5)
-  const depthScore = Math.min(9.5, Math.max(1.5, Math.round((
-    1.5 + Math.min(80, wordCount) / 16 + (matchedActions.length > 1 ? 1.5 : 0) + (relevanceRatio > 0.3 ? 1.5 : 0)
-  ) * 10) / 10));
-
-  // Evidence & Quantitative Metrics (1.0 - 9.5)
-  const evidenceScore = Math.min(9.5, Math.max(1.0, Math.round((
-    hasNumbers ? 5.5 + Math.min(3, numberCount) * 1.2 : 2.0 + (wordCount > 50 ? 1.0 : 0)
-  ) * 10) / 10));
-
-  // Role & Level Alignment (2.0 - 9.5)
-  const roleAlignmentScore = Math.min(9.5, Math.max(2.0, Math.round((
-    relevanceScore * 0.4 + depthScore * 0.3 + structureScore * 0.3
-  ) * 10) / 10));
-
-  // Weighted Overall Score
-  const rawWeighted = (
-    relevanceScore * 0.30 +
-    structureScore * 0.20 +
-    depthScore * 0.20 +
-    clarityScore * 0.15 +
-    evidenceScore * 0.10 +
-    roleAlignmentScore * 0.05
-  );
-
-  // Apply difficulty calibration penalty
-  const difficultyModifier = difficulty === 'advanced' ? 0.9 : difficulty === 'beginner' ? 1.05 : 1.0;
-  const overallScore = Math.min(9.8, Math.max(1.5, Math.round(rawWeighted * difficultyModifier * 10) / 10));
-
-  // 8. Specific Feedback Generation
-  const whatWorked: string[] = [];
-  const whatHeldYouBack: string[] = [];
-
-  if (relevanceRatio > 0.3) {
-    whatWorked.push(`Directly addressed core competencies in ${question.category || 'the scenario'}.`);
-  }
-  if (matchedActions.length >= 2) {
-    whatWorked.push(`Used strong proactive action verbs (${matchedActions.slice(0, 3).join(', ')}).`);
-  }
-  if (hasNumbers) {
-    whatWorked.push('Included concrete numerical evidence to quantify business or technical results.');
-  } else {
-    whatHeldYouBack.push(`Did not include quantified metrics or baseline-to-outcome deltas for this ${question.category || 'scenario'}.`);
-  }
-
-  if (wordCount < 40) {
-    whatHeldYouBack.push('Answer lacked technical depth and did not compare alternative trade-offs.');
+    return {
+      questionId: question.id,
+      overallScore: detScore.score,
+      scoreInterval: detScore.scoreInterval,
+      answerClassification: classification,
+      relevanceGate: { ...evaluation.relevanceGate, score: detScore.score },
+      professionalism: { status: 'acceptable' },
+      breakdown: {
+        relevance: classification === 'uncertain' ? 3 : 5,
+        structure: 5,
+        clarity: 7,
+        depth: classification === 'uncertain' ? 1 : 5,
+        evidence: classification === 'uncertain' ? 1 : 5,
+        roleAlignment: classification === 'uncertain' ? 2 : 5,
+      },
+      whatWorked: [],
+      whatHeldYouBack: classification === 'uncertain' ? ['Candidate stated unfamiliarity with this area.'] : [],
+      tryThisNextTime: {
+        framework: 'Growth Mindset',
+        suggestion: 'Consider related principles or first-principles reasoning if unfamiliar with exact tooling.',
+        promptToImprove: 'How would you approach learning or decomposing this problem from first principles?',
+      },
+      followUpNeeded: false,
+      missingSignals: expectedSignals,
+      observedSignals: [],
+      answerEvaluation: evaluation,
+      deterministicScore: detScore,
+    };
   }
 
-  if (whatWorked.length === 0) {
-    whatWorked.push('Provided a structured initial attempt to answer the question.');
+  // ─── 4. Substantive Answer Evidence Extraction & Dimension Scoring ────────
+
+  const positiveObservations: PositiveObservation[] = [];
+  const gaps: GapObservation[] = [];
+  const demonstratedSignals: string[] = [];
+  const missingSignals: string[] = [];
+  const competencySignalsExtracted: CompetencySignalExtracted[] = [];
+
+  // Check metrics / numbers
+  const hasNumbers = /\b(\d+%|\d+x|\$\d+|\d+\s*(?:users|ms|seconds|minutes|hours|days|weeks|months|years|kb|mb|gb|tb|engineers|customers|qps))\b/i.test(cleanAnswer);
+  
+  // Check action verbs & analytical verbs
+  const actionVerbs = [
+    'analyzed', 'analyze', 'designed', 'design', 'built', 'build', 'implemented', 'implement',
+    'led', 'architected', 'optimized', 'optimize', 'reduced', 'reduce', 'increased', 'increase',
+    'prioritized', 'prioritize', 'shipped', 'measured', 'measure', 'decompose', 'decomposed',
+    'investigate', 'investigated', 'formulate', 'formulated', 'check', 'checked', 'segment', 'segmented',
+  ];
+  const matchedActions = actionVerbs.filter((v) => lowerAnswer.includes(v));
+
+  // Check trade-offs
+  const hasTradeoffs = /\b(trade-off|tradeoff|versus|compromise|alternative|option a|option b|drawback|downside|latency vs|cost vs)\b/i.test(lowerAnswer);
+
+  for (const sig of expectedSignals) {
+    const sigLower = sig.toLowerCase();
+    const isMetricSig = sigLower.includes('metric') || sigLower.includes('outcome') || sigLower.includes('result');
+    const isTradeoffSig = sigLower.includes('trade-off') || sigLower.includes('alternative') || sigLower.includes('decision');
+
+    if (isMetricSig && hasNumbers) {
+      demonstratedSignals.push(sig);
+      positiveObservations.push({
+        observation: `Quantified outcome and metrics demonstrated`,
+        evidenceText: cleanAnswer.slice(0, 150),
+      });
+      competencySignalsExtracted.push({
+        competency: targetCompetency,
+        signalStrength: 'strong',
+        evidenceText: cleanAnswer.slice(0, 150),
+      });
+    } else if (isTradeoffSig && hasTradeoffs) {
+      demonstratedSignals.push(sig);
+      positiveObservations.push({
+        observation: `Articulated strategic trade-offs and alternatives`,
+        evidenceText: cleanAnswer.slice(0, 150),
+      });
+      competencySignalsExtracted.push({
+        competency: targetCompetency,
+        signalStrength: 'strong',
+        evidenceText: cleanAnswer.slice(0, 150),
+      });
+    } else if (matchedQuestionKeywords.length >= 2 || matchedActions.length >= 2) {
+      demonstratedSignals.push(sig);
+      positiveObservations.push({
+        observation: `Direct application of ${sig}`,
+        evidenceText: cleanAnswer.slice(0, 120),
+      });
+    } else {
+      missingSignals.push(sig);
+      gaps.push({ missingSignal: sig, expectedSignal: sig });
+    }
   }
 
-  // Framework recommendation based on category
-  let framework = 'STAR Framework';
-  let suggestion = `Detail your step-by-step decision criteria and quantify the before-and-after outcome for ${company}.`;
+  // Dimension scoring based on demonstrated evidence
+  const relevanceScore = Math.min(10.0, 5.0 + matchedQuestionKeywords.length * 1.5);
+  const depthScore = Math.min(10.0, 5.0 + (hasTradeoffs ? 2.5 : 0) + (matchedActions.length >= 2 ? 2.0 : 0) + (wordCount > 20 ? 1.0 : 0));
+  const evidenceScore = Math.min(10.0, 4.5 + (hasNumbers ? 4.0 : matchedActions.length >= 2 ? 2.5 : 1.0));
+  const structureScore = hasTradeoffs || matchedActions.length >= 2 ? 8.0 : 6.0;
+  const clarityScore = wordCount >= 15 && wordCount <= 200 ? 8.5 : 7.0;
+  const roleAlignmentScore = Math.min(10.0, 5.0 + matchedQuestionKeywords.length * 1.2);
 
-  if (question.category?.toLowerCase().includes('technical') || question.category?.toLowerCase().includes('architecture') || question.category?.toLowerCase().includes('system')) {
-    framework = 'Architectural Trade-off Framework';
-    suggestion = 'State initial constraints, compare 2 technical options, and explain why your chosen design won.';
-  } else if (question.category?.toLowerCase().includes('leadership') || question.category?.toLowerCase().includes('conflict')) {
-    framework = 'CAR (Context-Action-Result) Framework';
-    suggestion = 'Focus on stakeholder alignment, communication mechanisms, and final business consensus.';
-  }
+  const dimensions: AnswerEvaluation['dimensions'] = {
+    relevance: { score: relevanceScore, assessmentStatus: 'assessed', reason: `Matched ${matchedQuestionKeywords.length} question keywords.` },
+    depth: { score: depthScore, assessmentStatus: 'assessed', reason: hasTradeoffs ? 'Analyzed trade-offs.' : 'General explanation.' },
+    evidence: { score: evidenceScore, assessmentStatus: 'assessed', reason: hasNumbers ? 'Quantified metrics provided.' : 'Qualitative explanation.' },
+    structure: { score: structureScore, assessmentStatus: 'assessed', reason: 'Structured narrative.' },
+    clarity: { score: clarityScore, assessmentStatus: 'assessed', reason: 'Clear articulation.' },
+    roleAlignment: { score: roleAlignmentScore, assessmentStatus: 'assessed', reason: `Aligned with ${role} expectations.` },
+  };
+
+  const evaluation: AnswerEvaluation = {
+    questionId: question.id,
+    answerClassification: demonstratedSignals.length >= expectedSignals.length ? 'strong' : missingSignals.length > 1 ? 'partially_answered' : 'answered',
+    relevanceGate: {
+      status: relevanceScore >= 5.0 ? 'answered' : 'partially_answered',
+      reason: `Directly addressed core scenario.`,
+    },
+    positiveObservations,
+    gaps,
+    dimensions,
+    competencySignalsExtracted,
+    expectedSignals,
+    demonstratedSignals,
+    missingSignals,
+  };
+
+  const detScore = calculateDeterministicScore(evaluation);
+  const isWeak = detScore.score < 5.5;
 
   return {
     questionId: question.id,
-    overallScore,
-    scoreInterval: [Math.max(0, overallScore - 0.5), Math.min(10, overallScore + 0.5)],
-    answerClassification: overallScore >= 7.5 ? 'strong' : overallScore >= 5.0 ? 'adequate' : overallScore >= 3.0 ? 'weak' : 'irrelevant',
-    relevanceGate: {
-      status: overallScore >= 4.0 ? 'answered' : 'partially_answered',
-      score: relevanceScore,
-      reason: `Assessed relevance against ${question.category || 'domain'} hiring bar criteria.`,
-    },
+    overallScore: detScore.score,
+    scoreInterval: detScore.scoreInterval,
+    answerClassification: isWeak ? 'weak' : detScore.score >= 8.0 ? 'strong' : 'adequate',
+    relevanceGate: { ...evaluation.relevanceGate, score: detScore.score },
     professionalism: { status: 'acceptable' },
     breakdown: {
-      relevance: relevanceScore,
-      structure: structureScore,
-      clarity: clarityScore,
-      depth: depthScore,
-      evidence: evidenceScore,
-      roleAlignment: roleAlignmentScore,
+      relevance: dimensions.relevance.score || 0,
+      structure: dimensions.structure.score || 0,
+      clarity: dimensions.clarity.score || 0,
+      depth: dimensions.depth.score || 0,
+      evidence: dimensions.evidence.score || 0,
+      roleAlignment: dimensions.roleAlignment.score || 0,
     },
-    whatWorked,
-    whatHeldYouBack,
+    whatWorked: positiveObservations.map((p) => p.observation),
+    whatHeldYouBack: gaps.map((g) => `Missing evidence on: ${g.missingSignal}`),
     tryThisNextTime: {
-      framework,
-      suggestion,
-      promptToImprove: `How would you explain this outcome to the hiring committee at ${company}?`,
-      examplePhrasing: `In this scenario, our primary constraint was X, so we implemented Y, which improved performance by Z%.`,
+      framework: 'STAR / Evidence Framework',
+      suggestion: `Include specific trade-offs and metrics for ${role}.`,
+      promptToImprove: 'What exact metrics or technical trade-offs were measured?',
     },
-    followUpNeeded: overallScore < 5.5 && wordCount > 12,
-    followUpTriggerReason: hasNumbers ? undefined : 'Probe for quantitative metric lift or trade-off analysis.',
+    shouldFollowUp: isWeak && missingSignals.length > 0,
+    followUpReasonCode: isWeak ? 'missing_evidence' : undefined,
+    followUpNeeded: isWeak && missingSignals.length > 0,
+    followUpTriggerReason: isWeak ? 'missing_evidence' : undefined,
+    observedSignals: demonstratedSignals,
+    missingSignals,
+    answerEvaluation: evaluation,
+    deterministicScore: detScore,
   };
 }

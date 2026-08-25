@@ -19,9 +19,9 @@ function normalizeForMatching(text: string): string {
 }
 
 /**
- * Checks whether a claimed value or phrase is grounded in the source text.
+ * Verifies whether a claimed value or phrase is grounded in the source text.
  */
-function isPhraseInSourceText(phrase: string, sourceText: string): boolean {
+export function validateEvidence(phrase: string, sourceText: string): boolean {
   if (!phrase || !sourceText) return false;
   const normPhrase = normalizeForMatching(phrase);
   const normSource = normalizeForMatching(sourceText);
@@ -37,27 +37,40 @@ function isPhraseInSourceText(phrase: string, sourceText: string): boolean {
   return matchedWords.length / phraseWords.length >= 0.75;
 }
 
+// Alias for internal usage
+const isPhraseInSourceText = validateEvidence;
+
 /**
  * Validates whether a project name is a legitimate title or an illegitimate sentence fragment/bullet.
  */
-function isValidProjectTitle(name: string): { valid: boolean; reason?: string } {
+export function isValidProjectTitle(name: string): { valid: boolean; reason?: string } {
   const trimmed = (name || '').trim();
   if (!trimmed || trimmed.length < 3) {
     return { valid: false, reason: 'Project name is empty or too short' };
   }
 
-  // Reject if ends with a sentence period
-  if (/\.\s*$/.test(trimmed)) {
-    return { valid: false, reason: 'Sentence ending with period cannot be a project title' };
+  // Reject if ends with a sentence period or colon
+  if (/[\.:]\s*$/.test(trimmed)) {
+    return { valid: false, reason: 'Sentence ending with period/colon cannot be a project title' };
   }
 
   // Reject if starts with an action verb (indicates it is a bullet point sentence, not a project name)
-  if (/^(developed|implemented|engineered|designed|supervised|created|built|utilized|handled|analyzed|evaluated|achieved|trained|fine-tuned|deployed|assisted|led|wrote|built|tested)\b/i.test(trimmed)) {
+  if (/^(developed|implemented|engineered|designed|supervised|created|built|utilized|handled|analyzed|evaluated|achieved|trained|fine-tuned|deployed|assisted|led|wrote|tested|delivered|co-founded|collaborated|contributed|defined|supported|conducted|formulated|integrated|spearheaded|optimized|reduced|increased)\b/i.test(trimmed)) {
     return { valid: false, reason: 'Action verb sentence cannot be a project title' };
   }
 
+  // Reject if starts with continuation / fragment clauses
+  if (/^(documentation|sprint\s*tracking|backlog\s*prioritization|platforms|interface\s*design|using|where|which|whereby|with|for|by|through|including|supporting|across|and\b|to\b)\b/i.test(trimmed)) {
+    return { valid: false, reason: 'Continuation phrase or fragment cannot be a project title' };
+  }
+
+  // Reject page markers
+  if (/^(\[PAGE\s*\d+\]|page\s*\d+|\d{1,3})$/i.test(trimmed)) {
+    return { valid: false, reason: 'Page marker cannot be a project title' };
+  }
+
   // Reject if it is a generic technology name
-  if (/^(python|javascript|typescript|c\+\+|java|react|node\.js|html|css|sql|pandas|numpy|docker|aws|git)$/i.test(trimmed)) {
+  if (/^(python|javascript|typescript|c\+\+|java|react|node\.js|html|css|sql|pandas|numpy|docker|aws|git|figma)$/i.test(trimmed)) {
     return { valid: false, reason: 'Single technology name cannot be a project title' };
   }
 
@@ -66,18 +79,28 @@ function isValidProjectTitle(name: string): { valid: boolean; reason?: string } 
     return { valid: false, reason: 'Bullet point line cannot be a project title' };
   }
 
+  // Reject if date only
+  if (/^(?:\d{4}\s*[-–]\s*(?:Present|\d{4})|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}\s*[-–]\s*(?:Present|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}))$/i.test(trimmed)) {
+    return { valid: false, reason: 'Date range cannot be a project title' };
+  }
+
   return { valid: true };
 }
 
 /**
  * Validates whether an education entry is valid or an illegitimate isolated grade/character.
  */
-function isValidEducationRecord(degree?: string, institution?: string): { valid: boolean; reason?: string } {
+export function isValidEducationRecord(degree?: string, institution?: string): { valid: boolean; reason?: string } {
   const cleanDegree = (degree || '').trim();
   const cleanInst = (institution || '').trim();
 
   if (!cleanDegree && !cleanInst) {
     return { valid: false, reason: 'Education record has neither degree nor institution' };
+  }
+
+  // Reject page markers
+  if (/^(\[PAGE\s*\d+\]|page\s*\d+|\d{1,3})$/i.test(cleanDegree) || /^(\[PAGE\s*\d+\]|page\s*\d+|\d{1,3})$/i.test(cleanInst)) {
+    return { valid: false, reason: 'Page marker cannot be an Education entity' };
   }
 
   // Reject if degree or institution is ONLY a CGPA / grade string
@@ -99,7 +122,7 @@ function isValidEducationRecord(degree?: string, institution?: string): { valid:
 /**
  * Validates whether a work experience role is backed by verifiable employer provenance.
  */
-function isValidWorkExperience(company?: string, role?: string, sourceText?: string): { valid: boolean; reason?: string } {
+export function isValidWorkExperience(company?: string, role?: string, sourceText?: string): { valid: boolean; reason?: string } {
   const cleanCompany = (company || '').trim();
   const cleanRole = (role || '').trim();
 
@@ -107,9 +130,14 @@ function isValidWorkExperience(company?: string, role?: string, sourceText?: str
     return { valid: false, reason: 'Work experience has no company and no role' };
   }
 
-  // Reject synthetic placeholder companies
-  if (/^(previous organization|company|organization|employer|workplace|tech firm)$/i.test(cleanCompany)) {
-    return { valid: false, reason: 'Synthetic placeholder company rejected' };
+  // Reject synthetic placeholder companies & page markers
+  if (/^(previous organization|company|organization|employer|workplace|tech firm|\[page\s*\d+\]|interface design\.?|platforms|documentation)$/i.test(cleanCompany)) {
+    return { valid: false, reason: 'Synthetic placeholder or invalid fragment company rejected' };
+  }
+
+  // Reject page markers as role
+  if (/^(\[PAGE\s*\d+\]|page\s*\d+|\d{1,3})$/i.test(cleanRole)) {
+    return { valid: false, reason: 'Page marker cannot be a work experience role' };
   }
 
   // Reject synthetic placeholder roles
@@ -118,11 +146,42 @@ function isValidWorkExperience(company?: string, role?: string, sourceText?: str
   }
 
   if (sourceText && cleanCompany) {
-    if (!isPhraseInSourceText(cleanCompany, sourceText)) {
+    if (!validateEvidence(cleanCompany, sourceText)) {
       return { valid: false, reason: `Company "${cleanCompany}" not found in source resume text` };
     }
   }
 
+  return { valid: true };
+}
+
+/**
+ * Structural validation dispatcher for individual entities.
+ */
+export function validateEntityStructure(
+  entityType: 'project' | 'experience' | 'education' | 'achievement' | 'identity',
+  entityData: any
+): { valid: boolean; reason?: string } {
+  if (entityType === 'project') {
+    const title = typeof entityData === 'string' ? entityData : entityData?.name?.value || entityData?.heading || entityData?.name || '';
+    return isValidProjectTitle(title);
+  }
+  if (entityType === 'experience') {
+    const comp = entityData?.company?.value || entityData?.company || '';
+    const role = entityData?.role?.value || entityData?.role || '';
+    return isValidWorkExperience(comp, role);
+  }
+  if (entityType === 'education') {
+    const deg = entityData?.degree?.value || entityData?.degree || '';
+    const inst = entityData?.institution?.value || entityData?.institution || '';
+    return isValidEducationRecord(deg, inst);
+  }
+  if (entityType === 'achievement') {
+    const title = typeof entityData === 'string' ? entityData : entityData?.value || entityData?.title || '';
+    if (!title || title.length < 5 || /^(\[PAGE\s*\d+\]|page\s*\d+)$/i.test(title)) {
+      return { valid: false, reason: 'Invalid achievement statement or page marker' };
+    }
+    return { valid: true };
+  }
   return { valid: true };
 }
 
@@ -399,6 +458,7 @@ export function validateCandidateEvidenceModel(
   };
 
   return {
+    isValid: rejectedItems.length === 0,
     model: validatedModel,
     unsupportedClaims: rejectedItems.map((r) => r.value),
     confidenceAdjustments: [],

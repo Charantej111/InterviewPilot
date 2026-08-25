@@ -176,4 +176,16 @@ export const QUESTION_RUBRIC_REGISTRY: Record<QuestionType, QuestionTypeRubricCo
     ],
     inapplicablePenalties: [],
   },
+  closing: {
+    type: 'closing',
+    primaryEvaluationCriteria: [
+      'Professional synthesis',
+      'Gracious wrap-up',
+    ],
+    mandatoryStructure: 'Interview Closing and Synthesis',
+    expectedCharacteristicsGuidelines: [
+      'Interview closing acknowledgment',
+    ],
+    inapplicablePenalties: [],
+  },
 };

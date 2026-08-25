@@ -8,7 +8,9 @@ import {
 import {
   detectSections,
   detectProjectBoundaries,
+  detectExperienceBoundaries,
   detectEducationBoundaries,
+  detectAchievementBoundaries,
 } from './documentExtractor';
 
 // Common Technical & Domain Skills Dictionary for grounded extraction
@@ -45,12 +47,12 @@ export function normalizeResumeText(rawText: string): string {
   // Insert section marker tags strictly on line boundaries
   const sectionKeywords = [
     { pattern: /^[ \t]*(PROFILE\s*SUMMARY|PROFESSIONAL\s*SUMMARY|ABOUT\s*ME|CAREER\s*OBJECTIVE|OBJECTIVE)[ \t]*$/gim, tag: 'SUMMARY' },
-    { pattern: /^[ \t]*(TECHNICAL\s*SKILLS|CORE\s*COMPETENCIES|SKILLS\s*&?\s*COMPETENCIES|SKILLS\s*&?\s*ABILITIES|AREAS\s*OF\s*EXPERTISE|SKILLS)[ \t]*$/gim, tag: 'SKILLS' },
-    { pattern: /^[ \t]*(KEY\s*PROJECTS|PROJECTS\s*&?\s*INITIATIVES|ACADEMIC\s*PROJECTS|PERSONAL\s*PROJECTS|SELECTED\s*PROJECTS|PROJECTS)[ \t]*$/gim, tag: 'PROJECTS' },
-    { pattern: /^[ \t]*(WORK\s*EXPERIENCE|PROFESSIONAL\s*EXPERIENCE|EMPLOYMENT\s*HISTORY|WORK\s*HISTORY|EMPLOYMENT|EXPERIENCE|INTERNSHIPS?)[ \t]*$/gim, tag: 'EXPERIENCE' },
+    { pattern: /^[ \t]*(TECHNICAL\s*SKILLS|CORE\s*COMPETENCIES|SKILLS\s*&?\s*COMPETENCIES|SKILLS\s*&?\s*ABILITIES|AREAS\s*OF\s*EXPERTISE|SKILLS\s*&?\s*TOOLS|SKILLS\s*&?\s*TECHNOLOGIES|SKILLS)[ \t]*$/gim, tag: 'SKILLS' },
+    { pattern: /^[ \t]*(KEY\s*PROJECTS|PROJECTS\s*&?\s*INITIATIVES|ACADEMIC\s*PROJECTS|PERSONAL\s*PROJECTS|SELECTED\s*PROJECTS|PROJECT\s*EXPERIENCE|PROJECTS)[ \t]*$/gim, tag: 'PROJECTS' },
+    { pattern: /^[ \t]*(WORK\s*EXPERIENCE|PROFESSIONAL\s*EXPERIENCE|EMPLOYMENT\s*HISTORY|WORK\s*HISTORY|PROFESSIONAL\s*HISTORY|EMPLOYMENT|EXPERIENCE|INTERNSHIPS?|INTERNSHIP\s*EXPERIENCE)[ \t]*$/gim, tag: 'EXPERIENCE' },
     { pattern: /^[ \t]*(CERTIFICATIONS|CERTIFICATES|LICENSES\s*&?\s*CERTIFICATIONS)[ \t]*$/gim, tag: 'CERTIFICATIONS' },
-    { pattern: /^[ \t]*(ACHIEVEMENTS\s*\/?\s*AWARDS|HONORS?\s*&?\s*AWARDS|KEY\s*ACHIEVEMENTS|ACHIEVEMENTS|AWARDS|HONORS|ACCOMPLISHMENTS)[ \t]*$/gim, tag: 'ACHIEVEMENTS' },
-    { pattern: /^[ \t]*(EDUCATION|ACADEMIC\s*BACKGROUND|ACADEMIC\s*QUALIFICATIONS|QUALIFICATIONS)[ \t]*$/gim, tag: 'EDUCATION' },
+    { pattern: /^[ \t]*(SELECTED\s*ACHIEVEMENTS|ACHIEVEMENTS\s*\/?\s*AWARDS|HONORS?\s*&?\s*AWARDS|KEY\s*ACHIEVEMENTS|ACHIEVEMENTS|AWARDS|HONORS|ACCOMPLISHMENTS)[ \t]*$/gim, tag: 'ACHIEVEMENTS' },
+    { pattern: /^[ \t]*(EDUCATION\s*&?\s*QUALIFICATIONS|EDUCATION|ACADEMIC\s*BACKGROUND|ACADEMIC\s*QUALIFICATIONS|QUALIFICATIONS)[ \t]*$/gim, tag: 'EDUCATION' },
   ];
 
   for (const { pattern, tag } of sectionKeywords) {
@@ -184,55 +186,19 @@ export function parseResumeTextDeterministically(
       description,
       technologies: matchedTechs,
       metrics: metricMatch ? metricMatch[0] : undefined,
+      link: block.link,
     };
   });
 
-  // 4. Parse Work Experience (only if EXPERIENCE section is present with real employers)
+  // 4. Parse Work Experience via Generalized Experience Boundary Detector
   const expContent = sectionsMap.get('experience') || '';
-  const experience: { role: string; company: string; duration: string; highlights: string[] }[] = [];
-
-  if (expContent) {
-    const lines = expContent.split('\n').map((l) => l.trim()).filter(Boolean);
-    let currentExp: { header: string; bullets: string[] } | null = null;
-
-    for (const line of lines) {
-      const isBullet = line.startsWith('•') || line.startsWith('*') || line.startsWith('-');
-      const isHeaderCandidate = !isBullet && line.length < 80;
-
-      if (isHeaderCandidate && (!currentExp || currentExp.bullets.length > 0)) {
-        if (currentExp) {
-          const parts = currentExp.header.split('|');
-          const role = parts[0]?.trim() || currentExp.header;
-          const company = parts[1]?.trim() || '';
-          if (company || role.length > 3) {
-            experience.push({
-              role,
-              company,
-              duration: '',
-              highlights: currentExp.bullets,
-            });
-          }
-        }
-        currentExp = { header: line, bullets: [] };
-      } else if (currentExp) {
-        currentExp.bullets.push(line.replace(/^•\s*/, ''));
-      }
-    }
-
-    if (currentExp) {
-      const parts = currentExp.header.split('|');
-      const role = parts[0]?.trim() || currentExp.header;
-      const company = parts[1]?.trim() || '';
-      if (company || role.length > 3) {
-        experience.push({
-          role,
-          company,
-          duration: '',
-          highlights: currentExp.bullets,
-        });
-      }
-    }
-  }
+  const detectedExpBlocks = detectExperienceBoundaries(expContent);
+  const experience = detectedExpBlocks.map((block) => ({
+    role: block.role || 'Role',
+    company: block.company || '',
+    duration: [block.startDate, block.endDate].filter(Boolean).join(' – '),
+    highlights: block.highlights,
+  }));
 
   // 5. Parse Education via Generalized Education Boundary Detector
   const eduContent = sectionsMap.get('education') || '';
@@ -243,19 +209,16 @@ export function parseResumeTextDeterministically(
     year: block.year || '',
   }));
 
-  // 6. Parse Achievements
+  // 6. Parse Achievements via Generalized Achievement Boundary Detector
   const achContent = sectionsMap.get('achievements') || '';
-  const achievements: string[] = [];
-  if (achContent) {
-    const achLines = achContent.split('\n').map((l) => l.replace(/^•\s*/, '').trim()).filter((l) => l.length > 5);
-    achievements.push(...achLines);
-  }
+  const detectedAchBlocks = detectAchievementBoundaries(achContent);
+  const achievements = detectedAchBlocks.map((block) => block.title);
 
   // 7. Parse Certifications
   const certContent = sectionsMap.get('certifications') || '';
   const certifications: string[] = [];
   if (certContent) {
-    const certLines = certContent.split('\n').map((l) => l.replace(/^•\s*/, '').trim()).filter((l) => l.length > 5);
+    const certLines = certContent.split('\n').map((l) => l.replace(/^([•*-]|\d+\.)\s*/, '').trim()).filter((l) => l.length > 5 && !/^(\[PAGE\s*\d+\]|page\s*\d+)$/i.test(l));
     certifications.push(...certLines);
   }
 
@@ -331,6 +294,8 @@ export function parseResumeEvidenceDeterministically(
       parentBlockId: p.id || `proj_${idx + 1}`,
       confidence: 'high',
     },
+    link: p.link,
+    structuralConfidence: p.structuralConfidence || 0.95,
     problem: p.lines.length > 0 ? {
       value: p.lines[0],
       sourceText: p.lines[0],

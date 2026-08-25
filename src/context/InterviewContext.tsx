@@ -28,6 +28,8 @@ import { aiService } from '../services/supabase/aiService';
 import { evaluationService } from '../services/supabase/evaluationService';
 import { voiceManager } from '../services/voice/voiceManager';
 import { interviewBrain } from '../services/ai/interviewBrain';
+import { buildInterviewContract } from '../services/ai/interviewContract';
+import { initializeCompetencyMap, updateCompetencyState } from '../services/ai/competencyMap';
 import { storage } from '../lib/storage';
 
 
@@ -36,8 +38,11 @@ export interface ExtractionDebugSnapshot {
   normalizedText: string;
   sections: import('../types/resume').ExtractedSection[];
   lineBlocks: import('../types/resume').LineBlock[];
+  detectedSemanticBlocks?: import('../types/resume').ResumeSemanticBlock[];
   detectedProjects: import('../types/resume').ExtractedProjectBlock[];
+  detectedExperience?: import('../types/resume').ExtractedExperienceBlock[];
   detectedEducation: import('../types/resume').ExtractedEducationBlock[];
+  detectedAchievements?: import('../types/resume').ExtractedAchievementBlock[];
   rawGeminiOutput?: any;
   validatedEvidence: import('../types/resume').CandidateEvidenceModel;
   rejectedEvidence: { value: string; reason: string; section?: string }[];
@@ -208,6 +213,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     remainingTime: 20 * 60,
   });
 
+  const consecutiveScoresRef = useRef<number[]>([]);
+
   // Timer Tick Effect
   useEffect(() => {
     let interval: any;
@@ -300,8 +307,11 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       normalizedText: extractionRes.extractedDoc?.normalizedText || '',
       sections: extractionRes.extractedDoc?.sections || [],
       lineBlocks: extractionRes.extractedDoc?.lineBlocks || [],
+      detectedSemanticBlocks: extractionRes.extractedDoc?.detectedSemanticBlocks || [],
       detectedProjects: extractionRes.extractedDoc?.detectedProjects || [],
+      detectedExperience: extractionRes.extractedDoc?.detectedExperience || [],
       detectedEducation: extractionRes.extractedDoc?.detectedEducation || [],
+      detectedAchievements: extractionRes.extractedDoc?.detectedAchievements || [],
       rawGeminiOutput: (extractionRes as any).rawGeminiOutput,
       validatedEvidence: evidenceModel,
       rejectedEvidence: extractionRes.validationResult?.rejectedItems || [],
@@ -364,10 +374,12 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (hasJD && setupDraft.jdEvidenceModel) {
       try {
         const { computeMatchAssessment, buildLegacyMatchResult, computeMatchState } = await import('../services/ai/matchEngine');
-        const assessment = computeMatchAssessment(locked, setupDraft.jdEvidenceModel);
+        const { computeJDHash } = await import('../services/ai/jdValidator');
+        const jdHash = computeJDHash(setupDraft.jobDescriptionText, setupDraft.jobTitle, setupDraft.company);
+        const assessment = computeMatchAssessment(locked, setupDraft.jdEvidenceModel, jdHash);
         if (assessment) {
           matchAnalysis = buildLegacyMatchResult(assessment);
-          matchState = computeMatchState(locked, setupDraft.jdEvidenceModel);
+          matchState = computeMatchState(locked, setupDraft.jdEvidenceModel, locked.sessionId, jdHash);
         }
       } catch (err) {
         console.warn('Match computation failed on confirmation:', err);
@@ -446,10 +458,12 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (setupDraft.lockedCandidateContext && evidenceModel) {
       try {
         const { computeMatchAssessment, buildLegacyMatchResult, computeMatchState } = await import('../services/ai/matchEngine');
-        const assessment = computeMatchAssessment(setupDraft.lockedCandidateContext, evidenceModel);
+        const { computeJDHash } = await import('../services/ai/jdValidator');
+        const jdHash = computeJDHash(cleanText, title, company);
+        const assessment = computeMatchAssessment(setupDraft.lockedCandidateContext, evidenceModel, jdHash);
         if (assessment) {
           matchAnalysis = buildLegacyMatchResult(assessment);
-          matchState = computeMatchState(setupDraft.lockedCandidateContext, evidenceModel);
+          matchState = computeMatchState(setupDraft.lockedCandidateContext, evidenceModel, setupDraft.lockedCandidateContext.sessionId, jdHash);
         }
       } catch (err) {
         console.warn('Match computation error in analyzeJobDescription:', err);
@@ -540,27 +554,49 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setupDraft.jdEvidenceModel.responsibilities?.length)
     );
 
-    // Formulate Question #1 dynamically at interview start via Brain
+    const sessionId = (isAuthenticated && user?.id && !user.id.startsWith('mock_')) ? `sess_${Date.now()}` : `sess_${Date.now()}`;
+    const durationSecs = (setupDraft.durationMinutes || 20) * 60;
+
+    // 1. Build Deterministic Contract
+    const contract = buildInterviewContract(
+      sessionId,
+      durationSecs,
+      setupDraft.lockedCandidateContext,
+      isJdProvided ? setupDraft.jdEvidenceModel : null,
+      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+    );
+
+    // 2. Initialize Competency Map
+    const initialCompetencyMap = initializeCompetencyMap(
+      contract,
+      setupDraft.lockedCandidateContext,
+      isJdProvided ? setupDraft.jdEvidenceModel : null
+    );
+
+    // 3. Select Opening Objective
+    const openingObjective = interviewBrain.selectOpeningObjective(
+      contract,
+      setupDraft.lockedCandidateContext,
+      isJdProvided ? setupDraft.jdEvidenceModel : null,
+      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+    );
+
+    // 4. Generate Question #1 strictly (Zero Question #2 pre-generated)
     let openingQ: Question;
     if (setupDraft.lockedCandidateContext) {
-      const firstObjective = interviewBrain.selectFirstObjective(
-        setupDraft.lockedCandidateContext,
-        isJdProvided ? setupDraft.jdEvidenceModel : null,
-        isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null,
-        setupDraft.jobTitle || 'Target Role'
-      );
-
       openingQ = await aiService.generateOpeningQuestion({
-        objective: firstObjective,
+        objective: openingObjective,
         lockedContext: setupDraft.lockedCandidateContext,
         role: setupDraft.jobTitle || 'Target Role',
         companyName: setupDraft.company || 'Target Company',
         style: setupDraft.interviewStyle,
         difficulty: setupDraft.difficulty,
+        existingQuestions: [],
+        jdEvidenceModel: isJdProvided ? setupDraft.jdEvidenceModel : null,
       });
     } else {
       openingQ = {
-        id: `q_${Date.now()}`,
+        id: `q_${Date.now()}_1`,
         order: 1,
         type: 'initial',
         questionType: 'resume_deep_dive',
@@ -576,10 +612,10 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
     }
 
-    const durationSecs = (setupDraft.durationMinutes || 20) * 60;
     setRemainingSeconds(durationSecs);
     setTimerSeconds(0);
     setIsTimerRunning(true);
+    consecutiveScoresRef.current = [];
 
     const questionsToUse = [openingQ];
 
@@ -603,19 +639,26 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         questions: questionsToUse,
       });
 
-      setActiveSession(session);
-      storage.set('current_session', session);
+      const enrichedSession: InterviewSession = {
+        ...session,
+        interviewContract: contract,
+        competencyMap: initialCompetencyMap,
+        currentObjective: openingObjective,
+      };
+
+      setActiveSession(enrichedSession);
+      storage.set('current_session', enrichedSession);
       setEngineState('starting');
 
       if (mode === 'voice') {
         setTimeout(() => startVoiceSession(), 500);
       }
 
-      return session;
+      return enrichedSession;
     } else {
       const fallbackSession: InterviewSession = {
         ...createEmptySession(),
-        id: `sess_${Date.now()}`,
+        id: sessionId,
         jobTitle: setupDraft.jobTitle || 'Target Role',
         company: setupDraft.company || 'Target Company',
         interviewType: setupDraft.interviewType,
@@ -625,6 +668,9 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         mode,
         questions: questionsToUse,
         status: 'in_progress',
+        interviewContract: contract,
+        competencyMap: initialCompetencyMap,
+        currentObjective: openingObjective,
       };
 
       setActiveSession(fallbackSession);
@@ -881,83 +927,41 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       conversationStateRef.current.recentTurns.push(turn);
       conversationStateRef.current.conversationSummary += `\nCandidate on Q (${activeQuestion.category}): ${answerText.slice(0, 140)}...`;
 
-      // 2. Adaptive Follow-up Decision Loop
-      const canTriggerFollowUp = 
-        feedbackResult.followUpNeeded &&
-        activeQuestion.type === 'initial' &&
-        conversationStateRef.current.followUpsUsed < 2 &&
-        remainingSeconds > 180;
+      // 2. Update Live Competency Map & Score History
+      let updatedCompetencyMap = activeSession.competencyMap || {};
+      const activeObj = activeSession.currentObjective || {
+        targetCompetency: activeQuestion.targetCompetency || activeQuestion.category || 'Technical Depth',
+        questionType: activeQuestion.questionType || 'product_sense',
+        intent: activeQuestion.intent || 'Assess candidate approach',
+        useResumeGrounding: activeQuestion.source === 'resume',
+        difficulty: activeQuestion.difficulty || activeSession.difficulty || 'intermediate',
+        timeAllocationSeconds: 180,
+        isFollowUp: activeQuestion.type === 'follow_up',
+        expectedSignals: activeQuestion.expectedSignals || activeQuestion.expectedAnswerCharacteristics,
+      };
 
-      if (canTriggerFollowUp) {
-        setEngineState('follow_up');
-        conversationStateRef.current.followUpsUsed += 1;
+      const targetCompName = activeObj.targetCompetency;
+      if (targetCompName && updatedCompetencyMap[targetCompName]) {
+        const updatedState = updateCompetencyState(
+          updatedCompetencyMap[targetCompName],
+          feedbackResult,
+          activeObj,
+          answerText
+        );
+        updatedCompetencyMap = {
+          ...updatedCompetencyMap,
+          [targetCompName]: updatedState,
+        };
+      }
 
-        try {
-          const followUpQ = await aiService.generateAdaptiveFollowUp({
-            parentQuestion: activeQuestion,
-            candidateAnswer: answerText,
-            triggerReason: feedbackResult.followUpTriggerReason || 'Probe missing metric evidence or architecture trade-off.',
-            role: activeSession.jobTitle,
-            company: activeSession.company,
-            difficulty: activeSession.difficulty,
-            order: activeSession.currentQuestionIndex + 2,
-          });
-
-          // Insert into session & DB questions
-          let savedFollowUp = followUpQ;
-          if (isAuthenticated && user?.id && !user.id.startsWith('mock_') && !activeSession.id.startsWith('mock_')) {
-            savedFollowUp = await interviewService.insertAdaptiveQuestion(
-              activeSession.id,
-              followUpQ,
-              activeSession.currentQuestionIndex + 2
-            );
-          }
-
-          const updatedQuestions = [...activeSession.questions];
-          updatedQuestions.splice(activeSession.currentQuestionIndex + 1, 0, savedFollowUp);
-
-          const updatedSession: InterviewSession = {
-            ...activeSession,
-            questions: updatedQuestions,
-            answers: {
-              ...activeSession.answers,
-              [activeQuestion.id]: {
-                questionId: activeQuestion.id,
-                answerText,
-                inputMode,
-                durationSeconds: durationSecs,
-                submittedAt: new Date().toISOString(),
-                transcript: inputMode === 'voice' ? answerText : undefined,
-              },
-            },
-            feedbacks: {
-              ...activeSession.feedbacks,
-              [activeQuestion.id]: feedbackResult,
-            },
-          };
-
-          setActiveSession(updatedSession);
-          storage.set('current_session', updatedSession);
-
-          // If in Voice Mode, speak the follow-up prompt aloud
-          if (activeSession.mode === 'voice') {
-            const provider = voiceManager.getVoiceProvider();
-            setEngineState('asking');
-            setInterviewerSpokenText(savedFollowUp.text);
-            await provider.speak(savedFollowUp.text);
-            await provider.startListening();
-            setEngineState('listening');
-          }
-
-          return feedbackResult;
-        } catch (followUpErr) {
-          console.warn('Failed to inject adaptive follow-up, continuing normal flow:', followUpErr);
-        }
+      if (feedbackResult.overallScore !== undefined) {
+        consecutiveScoresRef.current.push(feedbackResult.overallScore);
       }
 
       // Normal session state update without immediate follow-up
       const updatedSession: InterviewSession = {
         ...activeSession,
+        competencyMap: updatedCompetencyMap,
         answers: {
           ...activeSession.answers,
           [activeQuestion.id]: {
@@ -991,120 +995,51 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const lastFeedback = (latestFeedback || (currentQ?.id ? activeSession.feedbacks[currentQ.id] : null)) as QuestionFeedback;
       const candidateLastAnswer = currentQ?.id ? activeSession.answers[currentQ.id]?.answerText || '' : '';
 
-      const hasEnoughTime = remainingSeconds > 60;
-      const maxQuestionsReached = nextIndex >= 8;
+      const isJdProvided = Boolean(
+        setupDraft.jobDescriptionProvided &&
+        setupDraft.jdEvidenceModel &&
+        (setupDraft.jdEvidenceModel.requiredSkills?.length ||
+          setupDraft.jdEvidenceModel.technicalRequirements?.length ||
+          setupDraft.jdEvidenceModel.responsibilities?.length)
+      );
 
-      if (hasEnoughTime && !maxQuestionsReached && setupDraft.lockedCandidateContext && currentQ) {
-        // Dynamic adaptive question generation via Brain
-        const prevObj = {
-          id: `obj_${nextIndex}`,
-          order: nextIndex,
-          type: 'test_critical_competency' as const,
-          targetCompetency: currentQ.targetCompetency || currentQ.category || 'Domain Competency',
-          focusRequirement: currentQ.sourceReference,
-          reasoning: currentQ.intent || '',
-          lookForSignals: currentQ.expectedSignals || [],
-          redFlagSignals: currentQ.redFlags || [],
-        };
+      const contract = activeSession.interviewContract || buildInterviewContract(
+        activeSession.id,
+        (activeSession.durationMinutes || 20) * 60,
+        setupDraft.lockedCandidateContext,
+        isJdProvided ? setupDraft.jdEvidenceModel : null,
+        isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+      );
 
-        const { nextObjective, isFollowUp } = interviewBrain.selectNextObjective(
-          prevObj,
-          lastFeedback || { shouldFollowUp: false },
-          setupDraft.lockedCandidateContext,
-          setupDraft.jdEvidenceModel,
-          setupDraft.matchAnalysis?.matchAssessment
-        );
+      const currentCompetencyMap = activeSession.competencyMap || initializeCompetencyMap(
+        contract,
+        setupDraft.lockedCandidateContext,
+        isJdProvided ? setupDraft.jdEvidenceModel : null
+      );
 
-        const dynamicNextQ = await aiService.generateAdaptiveQuestion({
-          objective: nextObjective,
-          previousQuestionText: currentQ.text,
-          candidateAnswerText: candidateLastAnswer,
-          role: activeSession.jobTitle,
-          companyName: activeSession.company,
-          isFollowUp,
-          style: activeSession.interviewStyle,
-        });
+      // Decision from Brain
+      const brainDecision = interviewBrain.selectNextObjective(
+        contract,
+        currentCompetencyMap,
+        lastFeedback,
+        conversationStateRef.current.recentTurns,
+        remainingSeconds,
+        consecutiveScoresRef.current,
+        setupDraft.lockedCandidateContext
+      );
 
-        const updatedQuestions = [...activeSession.questions, dynamicNextQ];
-        const updatedSession = {
-          ...activeSession,
-          questions: updatedQuestions,
-          currentQuestionIndex: nextIndex,
-          currentQuestionId: dynamicNextQ.id,
-        };
+      const nextObjective = brainDecision.nextObjective;
 
-        setActiveSession(updatedSession);
-        storage.set('current_session', updatedSession);
-        setLiveTranscript('');
+      // Check if closing objective selected or duration/questions budget reached
+      const isClosing = nextObjective.questionType === 'closing' || remainingSeconds <= 0;
 
-        if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
-        }
-
-        // Voice Mode: Speak the next question aloud
-        if (activeSession.mode === 'voice') {
-          const provider = voiceManager.getVoiceProvider();
-          setEngineState('asking');
-          const bridgeRemark = await aiService.generateInterviewerRemark({
-            action: isFollowUp ? 'ask_question' : 'transition',
-            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
-            role: activeSession.jobTitle,
-            company: activeSession.company,
-            style: activeSession.interviewStyle,
-            question: dynamicNextQ,
-            conversationSummary: conversationStateRef.current.conversationSummary,
-          });
-
-          setInterviewerSpokenText(bridgeRemark);
-          await provider.speak(bridgeRemark);
-          await provider.startListening();
-          setEngineState('listening');
-        }
-
-        return true;
-      } else if (nextIndex < activeSession.questions.length && hasEnoughTime) {
-        // Pre-calibrated batch fallback
-        const nextQ = activeSession.questions[nextIndex];
-        const updatedSession = {
-          ...activeSession,
-          currentQuestionIndex: nextIndex,
-          currentQuestionId: nextQ?.id || null,
-        };
-        setActiveSession(updatedSession);
-        storage.set('current_session', updatedSession);
-        setLiveTranscript('');
-
-        if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
-          await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
-        }
-
-        if (activeSession.mode === 'voice') {
-          const provider = voiceManager.getVoiceProvider();
-          setEngineState('asking');
-          const bridgeRemark = await aiService.generateInterviewerRemark({
-            action: 'transition',
-            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
-            role: activeSession.jobTitle,
-            company: activeSession.company,
-            style: activeSession.interviewStyle,
-            question: nextQ,
-            conversationSummary: conversationStateRef.current.conversationSummary,
-          });
-
-          setInterviewerSpokenText(bridgeRemark);
-          await provider.speak(bridgeRemark);
-          await provider.startListening();
-          setEngineState('listening');
-        }
-
-        return true;
-      } else {
-        // Complete interview session
+      if (isClosing) {
         setEngineState('completing');
         const updatedSession = {
           ...activeSession,
           status: 'completed' as const,
           completedAt: new Date().toISOString(),
+          competencyMap: currentCompetencyMap,
         };
         setActiveSession(updatedSession);
         storage.set('current_session', updatedSession);
@@ -1113,23 +1048,63 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'completed', 0);
         }
 
-        // Voice Mode: Deliver closing spoken remark
-        if (activeSession.mode === 'voice') {
-          const provider = voiceManager.getVoiceProvider();
-          const closing = await aiService.generateInterviewerRemark({
-            action: 'closing',
-            candidateName: setupDraft.candidateProfile?.name || 'Candidate',
-            role: activeSession.jobTitle,
-            company: activeSession.company,
-          });
-          setInterviewerSpokenText(closing);
-          await provider.speak(closing);
-          await provider.disconnect();
-        }
-
-        setEngineState('completed');
         return false;
       }
+
+      // Generate dynamic next question for the selected objective
+      const dynamicNextQ = await aiService.generateAdaptiveQuestion({
+        objective: nextObjective,
+        previousQuestionText: currentQ?.text || '',
+        candidateAnswerText: candidateLastAnswer,
+        role: activeSession.jobTitle,
+        companyName: activeSession.company,
+        isFollowUp: nextObjective.isFollowUp,
+        style: activeSession.interviewStyle,
+        existingQuestions: activeSession.questions || [],
+        lockedContext: setupDraft.lockedCandidateContext,
+        jdEvidenceModel: isJdProvided ? setupDraft.jdEvidenceModel : null,
+      });
+
+      const updatedQuestions = [...(activeSession.questions || []), dynamicNextQ];
+      const updatedSession: InterviewSession = {
+        ...activeSession,
+        questions: updatedQuestions,
+        currentQuestionIndex: nextIndex,
+        currentQuestionId: dynamicNextQ.id,
+        currentObjective: nextObjective,
+        competencyMap: currentCompetencyMap,
+        interviewContract: contract,
+      };
+
+      setActiveSession(updatedSession);
+      storage.set('current_session', updatedSession);
+      setLiveTranscript('');
+
+      if (isAuthenticated && user?.id && !user.id.startsWith('mock_')) {
+        await interviewService.updateSessionProgress(user.id, activeSession.id, nextIndex, 'in_progress', remainingSeconds);
+      }
+
+      // Voice Mode: Speak the next question aloud
+      if (activeSession.mode === 'voice') {
+        const provider = voiceManager.getVoiceProvider();
+        setEngineState('asking');
+        const bridgeRemark = await aiService.generateInterviewerRemark({
+          action: nextObjective.isFollowUp ? 'ask_question' : 'transition',
+          candidateName: setupDraft.candidateProfile?.name || 'Candidate',
+          role: activeSession.jobTitle,
+          company: activeSession.company,
+          style: activeSession.interviewStyle,
+          question: dynamicNextQ,
+          conversationSummary: conversationStateRef.current.conversationSummary,
+        });
+
+        setInterviewerSpokenText(bridgeRemark);
+        await provider.speak(bridgeRemark);
+        await provider.startListening();
+        setEngineState('listening');
+      }
+
+      return true;
     } finally {
       setIsPreparingNextQuestion(false);
     }

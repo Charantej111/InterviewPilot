@@ -354,7 +354,7 @@ export const resumeService = {
               }
             }
 
-            extractedPagesText += `\n[PAGE ${pageNum}]\n` + pageText;
+            extractedPagesText += (extractedPagesText ? '\n\n' : '') + pageText;
           }
 
           const cleanExtracted = extractedPagesText.trim();

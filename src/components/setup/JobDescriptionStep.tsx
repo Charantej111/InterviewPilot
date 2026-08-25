@@ -11,9 +11,10 @@ import {
   CheckCircle2, 
   ArrowRight, 
   ArrowLeft, 
-  Check, 
-  Target,
-  Edit3
+  Edit3,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 export interface JobDescriptionStepProps {
@@ -44,6 +45,7 @@ export const JobDescriptionStep: React.FC<JobDescriptionStepProps> = ({
   onBack,
 }) => {
   const [isEditing, setIsEditing] = useState(!jobProfile);
+  const [showDetails, setShowDetails] = useState(false);
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +53,13 @@ export const JobDescriptionStep: React.FC<JobDescriptionStepProps> = ({
     await onAnalyzeJD();
     setIsEditing(false);
   };
+
+  const totalRequirements = jobProfile
+    ? (jobProfile.requiredSkills?.length || 0) +
+      (jobProfile.preferredSkills?.length || 0) +
+      (jobProfile.responsibilities?.length || 0) +
+      (jobProfile.competencies?.length || 0)
+    : 0;
 
   return (
     <div className="space-y-6 animate-fadeIn text-left">
@@ -64,7 +73,7 @@ export const JobDescriptionStep: React.FC<JobDescriptionStepProps> = ({
           <ShiningText text="Target Job Description" />
         </h2>
         <p className="text-xs sm:text-sm text-foreground-muted">
-          Specify the target role and paste the complete job posting. InterviewPilot will extract key competencies, required qualifications, and interview rubrics.
+          Specify the target role and paste the complete job posting. InterviewPilot will deconstruct requirements for interview calibration.
         </p>
       </div>
 
@@ -146,100 +155,105 @@ export const JobDescriptionStep: React.FC<JobDescriptionStepProps> = ({
           <LetterLoader text="Deconstructing Job Requirements" size="md" />
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-foreground text-xs font-semibold border border-zinc-200 dark:border-zinc-700">
             <Sparkles size={13} className="text-purple-500 animate-spin" />
-            <span>Extracting core competencies, qualifications, and hiring rubrics...</span>
+            <span>Extracting verified requirements, categories, and seniority level...</span>
           </div>
         </div>
       )}
 
-      {/* Decomposed Job Profile Dossier */}
+      {/* Minimal Clean Job Profile Dossier */}
       {jobProfile && !isAnalyzing && !isEditing && (
         <div className="space-y-5 animate-fadeIn">
           {/* Header Card */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={20} />
-              </div>
-              <div className="text-left">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-bold text-foreground truncate max-w-[280px]">
-                    {jobProfile.role} at {jobProfile.company}
-                  </h4>
-                  <span className="px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-600 dark:text-purple-400 text-[10px] font-extrabold uppercase">
-                    Requirements Extracted
-                  </span>
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={20} />
                 </div>
-                <p className="text-[11px] text-foreground-muted font-medium">
-                  {jobProfile.experienceRequirements}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsEditing(true)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground-muted hover:text-foreground transition-colors cursor-pointer self-start sm:self-auto"
-            >
-              <Edit3 size={13} />
-              <span>Edit Job Description</span>
-            </button>
-          </div>
-
-          {/* Extracted Details Grid */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-6">
-            {/* Responsibilities */}
-            <div className="space-y-2.5">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
-                <Target size={14} className="text-purple-500" />
-                <span>Primary Role Responsibilities</span>
-              </h4>
-              <div className="space-y-2">
-                {jobProfile.responsibilities.map((resp, i) => (
-                  <div key={i} className="flex items-start gap-2.5 text-xs text-foreground leading-relaxed">
-                    <div className="w-4 h-4 rounded-full bg-purple-500/10 text-purple-500 flex items-center justify-center shrink-0 mt-0.5">
-                      <Check size={10} />
-                    </div>
-                    <span>{resp}</span>
+                <div className="text-left">
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-base font-bold text-foreground">
+                      {jobProfile.role}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-extrabold uppercase">
+                      Extracted
+                    </span>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Required Skills & Competencies */}
-            <div className="space-y-2.5">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted">
-                Required Core Skills & Tech Stack
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {jobProfile.requiredSkills.map((skill, i) => (
-                  <span
-                    key={i}
-                    className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs font-semibold border border-zinc-200 dark:border-zinc-700"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Evaluation Signals */}
-            {jobProfile.interviewSignals && jobProfile.interviewSignals.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted">
-                  Hiring Bar Evaluation Signals
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {jobProfile.interviewSignals.map((sig, i) => (
-                    <div
-                      key={i}
-                      className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/80 text-xs font-medium text-foreground"
-                    >
-                      • {sig}
-                    </div>
-                  ))}
+                  <p className="text-xs text-foreground-muted font-medium">
+                    {jobProfile.company} • {jobProfile.experienceRequirements}
+                  </p>
                 </div>
               </div>
-            )}
+
+              <button
+                type="button"
+                onClick={() => setIsEditing(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-foreground-muted hover:text-foreground transition-colors cursor-pointer self-start sm:self-auto"
+              >
+                <Edit3 size={13} />
+                <span>Edit Posting</span>
+              </button>
+            </div>
+
+            {/* High-Level Category Counts */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
+                <span className="text-foreground-muted font-medium">Total Requirements</span>
+                <p className="text-sm font-extrabold text-foreground font-mono">{totalRequirements}</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
+                <span className="text-foreground-muted font-medium">Core Skills</span>
+                <p className="text-sm font-extrabold text-foreground font-mono">{jobProfile.requiredSkills?.length || 0}</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
+                <span className="text-foreground-muted font-medium">Responsibilities</span>
+                <p className="text-sm font-extrabold text-foreground font-mono">{jobProfile.responsibilities?.length || 0}</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
+                <span className="text-foreground-muted font-medium">Competencies</span>
+                <p className="text-sm font-extrabold text-foreground font-mono">{jobProfile.competencies?.length || 0}</p>
+              </div>
+            </div>
+
+            {/* Optional Expandable Debug Details */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDetails(!showDetails)}
+                className="text-xs font-bold text-foreground-muted hover:text-foreground flex items-center gap-1.5 cursor-pointer"
+              >
+                <Layers size={13} />
+                <span>{showDetails ? 'Hide Requirement Details' : 'View Extracted Requirement Details'}</span>
+                {showDetails ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+
+              {showDetails && (
+                <div className="mt-3 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 space-y-3 text-xs animate-fadeIn">
+                  {jobProfile.requiredSkills?.length > 0 && (
+                    <div>
+                      <span className="font-bold text-foreground block mb-1">Required Skills:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {jobProfile.requiredSkills.map((s, i) => (
+                          <span key={i} className="px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700 text-[11px] font-medium">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {jobProfile.responsibilities?.length > 0 && (
+                    <div>
+                      <span className="font-bold text-foreground block mb-1">Responsibilities:</span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-foreground-muted text-[11px]">
+                        {jobProfile.responsibilities.slice(0, 5).map((r, i) => (
+                          <li key={i}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Action CTAs */}

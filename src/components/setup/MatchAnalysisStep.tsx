@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '../ui/Button';
 import { ShiningText } from '../ui/ShiningText';
 import { MatchAnalysisResult, GapPriority } from '../../types/matchAnalysis';
@@ -9,7 +9,11 @@ import {
   ArrowRight, 
   ArrowLeft, 
   ShieldCheck, 
-  Target 
+  Target,
+  Sparkles,
+  Layers,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -26,6 +30,9 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
   onContinue,
   onBack,
 }) => {
+  const [showScoreTrace, setShowScoreTrace] = useState(false);
+  const isDebug = typeof window !== 'undefined' && window.location.search.includes('matchDebug=true');
+
   if (!matchResult || matchResult.matchPercentage === null || matchResult.matchPercentage === undefined) {
     return (
       <div className="space-y-6 animate-fadeIn text-left">
@@ -39,7 +46,7 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
             <ShiningText text="Resume × JD Match" />
           </h2>
           <p className="text-xs sm:text-sm text-foreground-muted">
-            Add a job description to see how your verified experience aligns with the role requirements.
+            No job description was supplied. The interview will be dynamically grounded in your confirmed resume.
           </p>
         </div>
 
@@ -50,7 +57,7 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-foreground">No Job Description Provided</h3>
             <p className="text-xs sm:text-sm text-foreground-muted max-w-md mx-auto">
-              Your interview will be dynamically grounded in your confirmed resume deliverables and technical ownership.
+              Your interview will operate in <strong className="text-foreground">Resume-Grounded Mode</strong>, evaluating depth, technical trade-offs, and ownership of your confirmed deliverables.
             </p>
           </div>
           <div className="pt-2 flex justify-center gap-3">
@@ -66,7 +73,10 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
     );
   }
 
-  const { matchPercentage, deterministicBreakdown, matchingStrengths, actionableGaps, companyAlignmentSummary } = matchResult;
+  const { matchPercentage, directMatches, transferableMatches, gaps, companyAlignmentSummary, matchAssessment } = matchResult;
+  const directList = directMatches || [];
+  const transList = transferableMatches || [];
+  const gapList = gaps || [];
 
   return (
     <div className="space-y-6 animate-fadeIn text-left">
@@ -74,19 +84,19 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
       <div className="space-y-1">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-xs font-semibold border border-zinc-200 dark:border-zinc-700">
           <GitCompare size={13} className="text-zinc-500" />
-          <span>Stage 4 of 6 • Match Alignment & Gap Strategy</span>
+          <span>Stage 4 of 6 • Evidence-Based Match Alignment</span>
         </div>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
-          <ShiningText text="Resume ↔ Job Gap Analysis" />
+          <ShiningText text="Requirement × Evidence Alignment" />
         </h2>
         <p className="text-xs sm:text-sm text-foreground-muted">
-          Deterministic alignment calculation based on requirement coverage. Customize the probe priority for each identified gap before generating your interview.
+          Deterministic alignment calculation comparing your confirmed resume evidence against extracted job posting requirements.
         </p>
       </div>
 
       {/* Match Alignment Dossier */}
       <div className="space-y-5">
-        {/* Score & Formula Card */}
+        {/* Score Card */}
         <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -98,7 +108,7 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
                   {matchPercentage}%
                 </span>
                 <span className="text-xs text-foreground-muted font-semibold">
-                  (Requirement Coverage Baseline)
+                  ({matchAssessment?.verdict ? matchAssessment.verdict.toUpperCase() : 'CALCULATED'})
                 </span>
               </div>
             </div>
@@ -108,38 +118,32 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
             </div>
           </div>
 
-          {/* Breakdown Pills */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
-              <span className="text-foreground-muted font-medium">Required Skills Coverage</span>
-              <p className="text-sm font-extrabold text-foreground font-mono">
-                {deterministicBreakdown.requiredSkillsCoverage} / 45 pts
-              </p>
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-3 gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800 text-center">
+            <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-xs">
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold block">{directList.length}</span>
+              <span className="text-[11px] text-foreground-muted font-medium">Direct Matches</span>
             </div>
-            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
-              <span className="text-foreground-muted font-medium">Experience Depth</span>
-              <p className="text-sm font-extrabold text-foreground font-mono">
-                {deterministicBreakdown.experienceAlignment} / 30 pts
-              </p>
+            <div className="p-2.5 rounded-2xl bg-blue-500/10 text-xs">
+              <span className="text-blue-600 dark:text-blue-400 font-bold block">{transList.length}</span>
+              <span className="text-[11px] text-foreground-muted font-medium">Transferable</span>
             </div>
-            <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 text-xs space-y-0.5">
-              <span className="text-foreground-muted font-medium">Competency Overlap</span>
-              <p className="text-sm font-extrabold text-foreground font-mono">
-                {deterministicBreakdown.competenciesMatch} / 25 pts
-              </p>
+            <div className="p-2.5 rounded-2xl bg-amber-500/10 text-xs">
+              <span className="text-amber-600 dark:text-amber-400 font-bold block">{gapList.length}</span>
+              <span className="text-[11px] text-foreground-muted font-medium">Requirement Gaps</span>
             </div>
           </div>
         </div>
 
-        {/* Matching Strengths */}
-        {matchingStrengths && matchingStrengths.length > 0 && (
+        {/* Direct Matches */}
+        {directList.length > 0 && (
           <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
               <ShieldCheck size={14} className="text-emerald-500" />
-              <span>Verified Matching Strengths ({matchingStrengths.length})</span>
+              <span>Direct Verified Matches ({directList.length})</span>
             </h4>
             <div className="space-y-2">
-              {matchingStrengths.map((ms, i) => (
+              {directList.map((ms, i) => (
                 <div
                   key={i}
                   className="p-3 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-1"
@@ -147,78 +151,160 @@ export const MatchAnalysisStep: React.FC<MatchAnalysisStepProps> = ({
                   <div className="flex items-center gap-2">
                     <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
                     <span className="font-bold text-foreground">{ms.competency}</span>
+                    <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10">Direct</span>
                   </div>
-                  <p className="text-foreground-muted text-[11px] pl-5">{ms.evidence}</p>
+                  <p className="text-foreground-muted text-[11px] pl-5 italic">
+                    "{ms.evidence}"
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Actionable Gaps with User Priority Customization */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        {/* Transferable Matches */}
+        {transList.length > 0 && (
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
+              <Sparkles size={14} className="text-blue-500" />
+              <span>Transferable Capabilities ({transList.length})</span>
+            </h4>
+            <div className="space-y-2">
+              {transList.map((ms, i) => (
+                <div
+                  key={i}
+                  className="p-3 rounded-2xl bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20 text-xs space-y-1"
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={13} className="text-blue-500 shrink-0" />
+                    <span className="font-bold text-foreground">{ms.competency}</span>
+                    <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded bg-blue-500/10">Transferable</span>
+                  </div>
+                  <p className="text-foreground-muted text-[11px] pl-5 italic">
+                    "{ms.evidence}"
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Requirement Gaps */}
+        {gapList.length > 0 && (
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs space-y-4">
             <div className="space-y-0.5">
               <h4 className="text-xs font-bold uppercase tracking-wider text-foreground-muted flex items-center gap-1.5">
                 <Target size={14} className="text-amber-500" />
-                <span>Identified Gap Areas & Probe Opportunities</span>
+                <span>Identified Role Requirements Not Grounded on Resume ({gapList.length})</span>
               </h4>
               <p className="text-[11px] text-foreground-muted">
-                These JD requirements were not found on your resume. Set their interview probe priority or exclude them:
+                These specific requirements from the job posting did not have direct or transferable evidence in your confirmed profile:
               </p>
             </div>
+
+            <div className="space-y-2.5">
+              {gapList.map((gap) => (
+                <div
+                  key={gap.gapId}
+                  className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/80 text-xs space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle size={14} className="text-amber-500 shrink-0" />
+                      <span className="font-bold text-foreground">{gap.requirement}</span>
+                    </div>
+                    <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded bg-amber-500/10">
+                      {gap.criticality === 'blocking' ? 'Critical' : 'Required'}
+                    </span>
+                  </div>
+                  {gap.provenance?.snippet && (
+                    <p className="text-foreground-muted text-[11px] pl-5">
+                      <strong className="text-foreground">JD Source:</strong> "{gap.provenance.snippet}"
+                    </p>
+                  )}
+
+                  {/* Debug-only Priority Controller */}
+                  {isDebug && (
+                    <div className="pt-2 pl-5 flex items-center gap-2">
+                      <span className="text-[10px] text-foreground-muted uppercase font-bold">Debug Override:</span>
+                      <select
+                        value={gap.priority}
+                        onChange={(e) => onUpdateGapPriority(gap.gapId, e.target.value as GapPriority)}
+                        className="text-[10px] px-2 py-0.5 rounded border bg-surface"
+                      >
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                        <option value="excluded">Exclude</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
+        )}
 
-          <div className="space-y-3">
-            {actionableGaps.map((gap) => (
-              <div
-                key={gap.gapId}
-                className={cn(
-                  'p-4 rounded-2xl border transition-all text-xs space-y-2',
-                  gap.priority === 'excluded'
-                    ? 'bg-zinc-100/50 dark:bg-zinc-800/30 border-zinc-200 dark:border-zinc-800 opacity-60'
-                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-xs'
-                )}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle size={14} className="text-amber-500 shrink-0" />
-                    <span className="font-bold text-foreground text-sm">{gap.requirement}</span>
-                  </div>
+        {/* Explainable Mathematical Score Trace */}
+        {matchAssessment && matchAssessment.requirementMatches.length > 0 && (
+          <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setShowScoreTrace(!showScoreTrace)}
+              className="text-xs font-bold text-foreground-muted hover:text-foreground flex items-center gap-1.5 cursor-pointer w-full justify-between"
+            >
+              <span className="flex items-center gap-1.5">
+                <Layers size={13} />
+                <span>Explainable Score Trace (Why {matchPercentage}%?)</span>
+              </span>
+              {showScoreTrace ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
 
-                  {/* Priority Select Dropdown */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] text-foreground-muted font-bold uppercase">Probe Priority:</span>
-                    <select
-                      value={gap.priority}
-                      onChange={(e) => onUpdateGapPriority(gap.gapId, e.target.value as GapPriority)}
-                      className={cn(
-                        'px-2.5 py-1 rounded-xl text-xs font-bold border outline-none cursor-pointer',
-                        gap.priority === 'high'
-                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                          : gap.priority === 'medium'
-                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                          : gap.priority === 'low'
-                          ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-300 dark:border-zinc-700'
-                      )}
-                    >
-                      <option value="high">High Priority</option>
-                      <option value="medium">Medium Priority</option>
-                      <option value="low">Low Priority</option>
-                      <option value="excluded">Exclude from Interview</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pl-6 space-y-1 text-foreground-muted text-[11px]">
-                  <p><strong className="text-foreground">Recommendation:</strong> {gap.recommendation}</p>
-                  <p><strong className="text-foreground">Simulated Probe:</strong> "{gap.targetedProbeOpportunity}"</p>
-                </div>
+            {showScoreTrace && (
+              <div className="mt-3 overflow-x-auto text-xs animate-fadeIn">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-700 text-[10px] uppercase text-foreground-muted font-bold">
+                      <th className="py-2 pr-3">Requirement</th>
+                      <th className="py-2 px-2">Strength</th>
+                      <th className="py-2 px-2">Verdict</th>
+                      <th className="py-2 px-2">Weight</th>
+                      <th className="py-2 px-2">Multiplier</th>
+                      <th className="py-2 pl-2">Earned / Possible</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200/50 dark:divide-zinc-800/50 text-[11px]">
+                    {matchAssessment.requirementMatches.map((rm, idx) => (
+                      <tr key={idx} className="hover:bg-zinc-100/50 dark:hover:bg-zinc-800/30">
+                        <td className="py-2 pr-3 font-semibold text-foreground max-w-[220px] truncate" title={rm.jdRequirement.requirement}>
+                          {rm.jdRequirement.requirement}
+                        </td>
+                        <td className="py-2 px-2 capitalize text-foreground-muted">
+                          {rm.jdRequirement.strength} {rm.jdRequirement.critical ? '(Crit)' : ''}
+                        </td>
+                        <td className="py-2 px-2">
+                          <span className={cn(
+                            'px-1.5 py-0.5 rounded text-[10px] font-bold uppercase',
+                            rm.verdict === 'direct' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                            rm.verdict === 'transferable' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                            'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          )}>
+                            {rm.verdict}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 font-mono text-foreground-muted">{rm.scoreTrace.weight}x</td>
+                        <td className="py-2 px-2 font-mono text-foreground-muted">{rm.scoreTrace.multiplier}</td>
+                        <td className="py-2 pl-2 font-mono font-bold text-foreground">
+                          {rm.scoreTrace.earnedPoints} / {rm.scoreTrace.possiblePoints} pts
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
+            )}
           </div>
-        </div>
+        )}
 
         {/* Action CTAs */}
         <div className="flex items-center justify-between pt-2">
