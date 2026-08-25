@@ -151,13 +151,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
         {/* Mobile Header Bar */}
         <header className="workspace-mobile md:hidden px-4 py-3 border-b border-border/80 bg-surface/80 backdrop-blur-xl flex items-center justify-between sticky top-0 z-30">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-tr from-indigo-500 to-pink-500 p-[1px]">
-              <div className="w-full h-full rounded-[5px] bg-[#0b0b12] flex items-center justify-center text-[9px] font-extrabold text-white">
-                IP
-              </div>
-            </div>
-            <span className="font-extrabold text-sm text-foreground">InterviewPilot</span>
+          <Link to="/" className="flex items-center">
+            <Logo size="md" />
           </Link>
 
           <div className="flex items-center gap-2">
@@ -196,13 +191,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
               >
                 <div>
                   <div className="flex items-center justify-between pb-6 border-b border-slate-200 dark:border-white/10">
-                    <Link to="/" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-indigo-500 to-pink-500 p-[1px]">
-                        <div className="w-full h-full rounded-[7px] bg-[#0b0b12] flex items-center justify-center text-[10px] font-bold text-white">
-                          IP
-                        </div>
-                      </div>
-                      <span className="font-extrabold text-base text-slate-900 dark:text-white">InterviewPilot</span>
+                    <Link to="/" onClick={() => setMobileMenuOpen(false)} className="flex items-center">
+                      <Logo size="md" />
                     </Link>
                     <button
                       onClick={() => setMobileMenuOpen(false)}

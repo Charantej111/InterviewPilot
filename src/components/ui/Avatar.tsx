@@ -68,6 +68,15 @@ export const Avatar: React.FC<AvatarProps> = ({
     '2xl': { box: 'w-20 h-20 text-xl font-extrabold', status: 'w-4 h-4 ring-2', badge: 'w-6 h-6 p-1' },
   };
 
+  const emojiPaddingMap = {
+    xs: 'p-1',
+    sm: 'p-1.5',
+    md: 'p-2',
+    lg: 'p-2.5',
+    xl: 'p-3.5',
+    '2xl': 'p-4',
+  };
+
   const statusColors = {
     online: 'bg-emerald-500 ring-background',
     busy: 'bg-rose-500 ring-background',
@@ -98,7 +107,7 @@ export const Avatar: React.FC<AvatarProps> = ({
             onError={() => setImageError(true)}
           />
         ) : isAppleEmoji(src) ? (
-          <div className="w-full h-full flex items-center justify-center p-1 sm:p-1.5">
+          <div className={cn('w-full h-full flex items-center justify-center', emojiPaddingMap[size])}>
             <Emoji
               name={getAppleEmojiName(src!)}
               className="w-full h-full object-contain select-none drop-shadow-xs"
