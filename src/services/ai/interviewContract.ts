@@ -12,6 +12,7 @@ import type { LockedCandidateContext } from '../../types/resume';
 import type { JDEvidenceModel } from '../../types/jobDescription';
 import type { MatchAssessment } from '../../types/matchAnalysis';
 import type { InterviewContract } from '../../types/interview';
+import { deriveRoleScopedResumeCompetencies } from './roleScoping';
 
 export function getQuestionBounds(durationSeconds: number): { minQuestions: number; maxQuestions: number } {
   const durationMinutes = Math.round(durationSeconds / 60);
@@ -120,65 +121,11 @@ export function deriveJDCompetencies(
 }
 
 export function deriveResumeCompetencies(
-  candidateContext?: LockedCandidateContext | null
+  candidateContext?: LockedCandidateContext | null,
+  targetRole?: string
 ): { criticalCompetencies: string[]; optionalCompetencies: string[] } {
-  const criticalSet = new Set<string>();
-  const optionalSet = new Set<string>();
-
-  if (!candidateContext?.evidenceModel) {
-    return {
-      criticalCompetencies: ['Technical Ownership & Architecture', 'Problem Solving & Execution'],
-      optionalCompetencies: ['Cross-Functional Collaboration'],
-    };
-  }
-
-  const model = candidateContext.evidenceModel;
-
-  // 1. Projects provide concrete technical execution deliverables
-  for (const p of model.projects || []) {
-    if (p.name?.value) {
-      criticalSet.add(`Project Execution: ${p.name.value}`);
-    }
-  }
-
-  // 2. Work experience specialties
-  for (const exp of model.workExperience || []) {
-    if (exp.role?.value && exp.company?.value) {
-      criticalSet.add(`${exp.role.value} at ${exp.company.value}`);
-    }
-  }
-
-  // 3. Verified skills become critical/optional competencies
-  const skills = model.skills || ({} as any);
-  const techSkills = Array.isArray(skills.technical) ? skills.technical : [];
-  const prodSkills = Array.isArray(skills.product) ? skills.product : [];
-  const domainSkills = Array.isArray(skills.domain) ? skills.domain : [];
-
-  for (const s of [...techSkills, ...prodSkills]) {
-    if (s.value) {
-      if (criticalSet.size < 4) {
-        criticalSet.add(s.value);
-      } else {
-        optionalSet.add(s.value);
-      }
-    }
-  }
-
-  for (const s of domainSkills) {
-    if (s.value && !criticalSet.has(s.value)) {
-      optionalSet.add(s.value);
-    }
-  }
-
-  if (criticalSet.size === 0) {
-    criticalSet.add('Technical Ownership & Deliverables');
-    criticalSet.add('System Design & Architecture');
-  }
-
-  return {
-    criticalCompetencies: Array.from(criticalSet),
-    optionalCompetencies: Array.from(optionalSet),
-  };
+  const roleName = targetRole || candidateContext?.evidenceModel?.identity?.role?.value || 'Software Engineer';
+  return deriveRoleScopedResumeCompetencies(roleName, candidateContext);
 }
 
 /**
@@ -189,7 +136,8 @@ export function buildInterviewContract(
   durationSeconds: number,
   candidateContext?: LockedCandidateContext | null,
   jdEvidenceModel?: JDEvidenceModel | null,
-  matchAssessment?: MatchAssessment | null
+  matchAssessment?: MatchAssessment | null,
+  targetRole?: string
 ): InterviewContract {
   const isJdMatched = Boolean(
     jdEvidenceModel &&
@@ -203,7 +151,7 @@ export function buildInterviewContract(
 
   const { criticalCompetencies, optionalCompetencies } = isJdMatched && jdEvidenceModel
     ? deriveJDCompetencies(jdEvidenceModel, matchAssessment)
-    : deriveResumeCompetencies(candidateContext);
+    : deriveResumeCompetencies(candidateContext, targetRole);
 
   const { minQuestions, maxQuestions } = getQuestionBounds(durationSeconds);
   const timeBudget = calculateTimeBudget(durationSeconds);

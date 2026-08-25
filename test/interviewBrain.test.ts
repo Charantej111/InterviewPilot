@@ -199,7 +199,11 @@ export function runInterviewBrainTests(): { passed: number; failed: number } {
 
   // Test 4: Resume-grounded competency derivation
   const resumeComps = deriveResumeCompetencies(mockCandidateContext);
-  assert(resumeComps.criticalCompetencies.some((c) => c.includes('Self-Serve Onboarding Revamp')), 'Scenario 4: Grounded in project');
+  assert(
+    resumeComps.criticalCompetencies.some((c) => c.includes('Self-Serve Onboarding Revamp')) ||
+      resumeComps.optionalCompetencies.some((c) => c.includes('Self-Serve Onboarding Revamp')),
+    'Scenario 4: Grounded in project'
+  );
 
   // Test 5: No JD => zero fabricated JD requirements
   assert(contract2.criticalCompetencies.every((c) => !c.includes('Lead Product Manager')), 'Scenario 5: Zero JD requirement fabrication');

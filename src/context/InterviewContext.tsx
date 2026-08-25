@@ -563,7 +563,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       durationSecs,
       setupDraft.lockedCandidateContext,
       isJdProvided ? setupDraft.jdEvidenceModel : null,
-      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null,
+      setupDraft.jobTitle
     );
 
     // 2. Initialize Competency Map
@@ -578,7 +579,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       contract,
       setupDraft.lockedCandidateContext,
       isJdProvided ? setupDraft.jdEvidenceModel : null,
-      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+      isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null,
+      setupDraft.jobTitle
     );
 
     // 4. Generate Question #1 strictly (Zero Question #2 pre-generated)
@@ -1121,7 +1123,8 @@ export const InterviewProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           (activeSession.durationMinutes || 20) * 60,
           setupDraft.lockedCandidateContext,
           isJdProvided ? setupDraft.jdEvidenceModel : null,
-          isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null
+          isJdProvided ? setupDraft.matchAnalysis?.matchAssessment : null,
+          activeSession.jobTitle || setupDraft.jobTitle
         );
 
         const targetCompName = currentQ.targetCompetency || currentQ.category;

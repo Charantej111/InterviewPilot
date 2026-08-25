@@ -33,12 +33,7 @@ export const Navbar: React.FC = () => {
           >
             Features
           </a>
-          <a
-            href="#pricing"
-            className="px-3.5 py-1.5 rounded-full hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-          >
-            Pricing
-          </a>
+
           {isAuthenticated && (
             <NavLink
               to="/dashboard"

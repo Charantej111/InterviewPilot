@@ -6,6 +6,7 @@ import { runAnswerIntelligenceTests } from './answerIntelligence.test';
 import { runStructuralParsingTests } from './resumeStructure.test';
 import { runInterviewLifecycleTests } from './interviewLifecycle.test';
 import { runVoiceConversationTests } from './voiceConversation.test';
+import { runRoleScopedResumeGroundedTests } from './roleScopedResumeGrounded.test';
 
 console.log('====================================================');
 console.log('  RUNNING INTERVIEWPILOT ENGINE REGRESSION TEST SUITE  ');
@@ -40,6 +41,9 @@ const lifecycleResults = runInterviewLifecycleTests();
 console.log('\n--- 8. Testing New Phase 5 Voice Safety & Transcript Reducers ---');
 const voiceConvResults = runVoiceConversationTests();
 
+console.log('\n--- 9. Testing Role-Scoped Resume Grounding & Archetype Isolation Engine ---');
+const roleScopedResults = runRoleScopedResumeGroundedTests();
+
 const totalPassed = 
   aiPipelineResults.passed + 
   resumeResults.passed + 
@@ -48,7 +52,8 @@ const totalPassed =
   brainResults.passed + 
   answerIntelligenceCount +
   lifecycleResults.passed +
-  voiceConvResults.passed;
+  voiceConvResults.passed +
+  roleScopedResults.passed;
 
 const totalFailed = 
   aiPipelineResults.failed + 
@@ -57,7 +62,8 @@ const totalFailed =
   voiceIntegrityResults.failed + 
   brainResults.failed +
   lifecycleResults.failed +
-  voiceConvResults.failed;
+  voiceConvResults.failed +
+  roleScopedResults.failed;
 
 console.log('\n====================================================');
 console.log(`TOTAL PASSED: ${totalPassed} | TOTAL FAILED: ${totalFailed}`);

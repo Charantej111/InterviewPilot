@@ -542,7 +542,17 @@ export function runAnswerIntelligenceTests(): number {
     };
 
     const sweContract = buildInterviewContract('ses_swe', 1200, sweContext, null, null);
-    assert(sweContract.criticalCompetencies.some((c) => c.toLowerCase().includes('backend') || c.toLowerCase().includes('kafka') || c.toLowerCase().includes('techcorp')), 'Scenario 34B: SWE resume derives engineering competencies');
+    assert(
+      sweContract.criticalCompetencies.some((c) =>
+        c.toLowerCase().includes('architecture') ||
+        c.toLowerCase().includes('api') ||
+        c.toLowerCase().includes('data modeling') ||
+        c.toLowerCase().includes('delivery') ||
+        c.toLowerCase().includes('backend') ||
+        c.toLowerCase().includes('engineering')
+      ),
+      'Scenario 34B: SWE resume derives engineering competencies'
+    );
 
     count += 4;
   }

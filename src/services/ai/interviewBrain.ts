@@ -27,6 +27,7 @@ import type { JDEvidenceModel } from '../../types/jobDescription';
 import type { MatchAssessment } from '../../types/matchAnalysis';
 import { getExpectedSignalsForType, updateCompetencyState } from './competencyMap';
 import { deriveConversationIntent } from './conversationIntent';
+import { scopeResumeEvidenceToRole } from './roleScoping';
 
 export interface BrainDecisionResult {
   nextObjective: InterviewObjective;
@@ -140,7 +141,8 @@ export const interviewBrain = {
     contract: InterviewContract,
     candidateContext?: LockedCandidateContext | null,
     jdEvidenceModel?: JDEvidenceModel | null,
-    matchAssessment?: MatchAssessment | null
+    matchAssessment?: MatchAssessment | null,
+    targetRole?: string
   ): InterviewObjective {
     const criticalCompetencies = contract.criticalCompetencies || [];
     const directMatches = matchAssessment?.directMatches || [];
@@ -165,16 +167,23 @@ export const interviewBrain = {
       };
     }
 
-    // 2. If candidate has confirmed projects, ground in first flagship project
-    const projects = candidateContext?.evidenceModel.projects || [];
-    if (projects.length > 0 && candidateContext) {
-      const topProj = projects[0];
-      const targetComp = criticalCompetencies[0] || 'Technical & Project Execution';
+    // 2. If candidate has confirmed direct projects in the target role scope, ground in top direct project
+    const scopedEvidence = candidateContext?.evidenceModel && targetRole
+      ? scopeResumeEvidenceToRole(targetRole, candidateContext.evidenceModel)
+      : null;
+
+    const directProjects = scopedEvidence
+      ? scopedEvidence.directProjects
+      : (candidateContext?.evidenceModel.projects || []);
+
+    if (directProjects.length > 0 && candidateContext) {
+      const topProj = directProjects[0];
+      const targetComp = criticalCompetencies[0] || 'Technical & Domain Execution';
 
       return {
         targetCompetency: targetComp,
         questionType: 'resume_deep_dive',
-        intent: `Assess individual ownership, architecture decomposition, and trade-offs for project ${topProj.name?.value || ''}.`,
+        intent: `Assess individual ownership, execution decomposition, and trade-offs for project ${topProj.name?.value || ''}.`,
         useResumeGrounding: true,
         difficulty: 'intermediate',
         timeAllocationSeconds: Math.round(contract.timeBudget.opening),
@@ -185,14 +194,14 @@ export const interviewBrain = {
       };
     }
 
-    // 3. Fallback: First critical competency
+    // 3. Fallback: First critical competency for target role (behavioral / exploratory approach without assuming experience)
     const firstComp = criticalCompetencies[0] || 'Core Domain Competency';
     const hasEvidence = hasConfirmedResumeEvidence(firstComp, candidateContext);
 
     return {
       targetCompetency: firstComp,
       questionType: jdEvidenceModel ? 'product_sense' : 'behavioral',
-      intent: `Assess candidate approach and foundational principles regarding ${firstComp}.`,
+      intent: `Assess candidate approach, foundational principles, and methodologies regarding ${firstComp}.`,
       useResumeGrounding: hasEvidence.hasEvidence,
       difficulty: 'intermediate',
       timeAllocationSeconds: Math.round(contract.timeBudget.opening),

@@ -1031,6 +1031,7 @@ INSTRUCTIONS:
 4. DO NOT provide hints, sample answers, or model answers.
 5. DO NOT ask multiple compound questions.
 6. DO NOT fabricate candidate resume evidence.
+7. STRICT ROLE BOUNDARY: The interview is specifically for the target role "${role}". Questions MUST strictly evaluate competencies relevant to "${role}". NEVER ask out-of-scope technical questions (e.g., do NOT ask backend coding or server questions for a UI/UX role).
 
 Return JSON strictly matching this schema:
 {
@@ -1138,6 +1139,7 @@ INSTRUCTIONS:
 4. DO NOT provide hints, sample answers, or model answers.
 5. DO NOT ask multiple compound questions.
 6. DO NOT fabricate candidate resume evidence.
+7. STRICT ROLE BOUNDARY: The interview is specifically for the target role "${role}". Questions and probes MUST be strictly within the domain of "${role}". NEVER ask out-of-scope technical questions (e.g., do NOT ask backend coding or server questions for a UI/UX role).
 
 Return JSON strictly matching this schema:
 {
